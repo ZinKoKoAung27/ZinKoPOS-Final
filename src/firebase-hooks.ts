@@ -7,7 +7,10 @@ export function useFirebaseSync(
   setSales: any,
   setCategories: any,
   setStaffAccounts: any,
-  setAdminCredentials: any
+  setAdminCredentials: any,
+  setExpenses: any,
+  setBranches: any,
+  setCustomers: any
 ) {
   useEffect(() => {
     const unsubProducts = onSnapshot(collection(db, 'products'), (snapshot) => {
@@ -19,6 +22,18 @@ export function useFirebaseSync(
       const salesData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
       salesData.sort((a: any, b: any) => b.timestamp - a.timestamp);
       setSales(salesData);
+    });
+
+    const unsubExpenses = onSnapshot(collection(db, 'expenses'), (snapshot) => {
+      const expensesData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      expensesData.sort((a: any, b: any) => b.timestamp - a.timestamp);
+      setExpenses(expensesData);
+    });
+
+    const unsubCustomers = onSnapshot(collection(db, 'customers'), (snapshot) => {
+      const customersData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      customersData.sort((a: any, b: any) => b.createdAt - a.createdAt);
+      setCustomers(customersData);
     });
 
     const unsubSettings = onSnapshot(doc(db, 'settings', 'general'), (docSnap) => {
@@ -35,6 +50,11 @@ export function useFirebaseSync(
       }
     });
 
+    const unsubBranches = onSnapshot(collection(db, 'branches'), (snapshot) => {
+      const branchesData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      setBranches(branchesData);
+    });
+
     const unsubStaff = onSnapshot(collection(db, 'staffAccounts'), (snapshot) => {
       const staffData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
       setStaffAccounts(staffData);
@@ -43,8 +63,11 @@ export function useFirebaseSync(
     return () => {
       unsubProducts();
       unsubSales();
+      unsubExpenses();
+      unsubCustomers();
       unsubSettings();
+      unsubBranches();
       unsubStaff();
     };
-  }, [setProducts, setSales, setCategories, setStaffAccounts, setAdminCredentials]);
+  }, [setProducts, setSales, setCategories, setStaffAccounts, setAdminCredentials, setExpenses, setBranches, setCustomers]);
 }

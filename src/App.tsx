@@ -1278,7 +1278,7 @@ export default function App() {
 
   // --- Render Helpers ---
 
-  const normalizeText = (text: string) => text.toLowerCase().replace(/[^a-z0-9]/g, "");
+  const normalizeText = (text: string) => text.toLowerCase();
   
   const searchTerms = searchQuery.trim().toLowerCase().split(/\s+/).map(normalizeText).filter(t => t.length > 0);
 

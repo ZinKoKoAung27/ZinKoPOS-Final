@@ -60,7 +60,6 @@ import {
   increment,
   getDocFromServer
 } from 'firebase/firestore';
-import { signInWithPopup, GoogleAuthProvider, onAuthStateChanged, signOut } from 'firebase/auth';
 import { db, auth } from './firebase';
 import { useFirebaseSync } from './firebase-hooks';
 import * as htmlToImage from 'html-to-image';
@@ -751,36 +750,12 @@ function handleFirestoreError(error: unknown, operationType: OperationType, path
 }
 
 export default function App() {
-  const [firebaseUser, setFirebaseUser] = useState<any>(null);
-  const [isFirebaseReady, setIsFirebaseReady] = useState(false);
+  const [isAuthReady, setIsAuthReady] = useState(false);
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (user) => {
-      setFirebaseUser(user);
-      setIsFirebaseReady(true);
-    });
-    return () => unsubscribe();
+    const timer = setTimeout(() => setIsAuthReady(true), 1000);
+    return () => clearTimeout(timer);
   }, []);
-
-  const handleGoogleLogin = async () => {
-    const provider = new GoogleAuthProvider();
-    try {
-      await signInWithPopup(auth, provider);
-    } catch (error) {
-      console.error("Error signing in with Google:", error);
-    }
-  };
-
-  const handleFirebaseLogout = async () => {
-    try {
-      await signOut(auth);
-      setIsAuthenticated(false);
-      localStorage.removeItem('pos_auth');
-      localStorage.removeItem('pos_current_user');
-    } catch (error) {
-      console.error("Error signing out:", error);
-    }
-  };
 
   const [isAuthenticated, setIsAuthenticated] = useState(() => {
     const saved = localStorage.getItem('pos_auth');
@@ -1409,6 +1384,17 @@ export default function App() {
     return searchTerms.every(term => searchableText.includes(term));
   });
 
+  if (!isAuthReady) {
+    return (
+      <div className="min-h-screen bg-[#0f172a] flex items-center justify-center">
+        <div className="flex flex-col items-center gap-4">
+          <div className="w-12 h-12 border-4 border-indigo-500/30 border-t-indigo-500 rounded-full animate-spin" />
+          <p className="text-indigo-300 font-medium animate-pulse">Initializing...</p>
+        </div>
+      </div>
+    );
+  }
+
   if (!isAuthenticated) {
     return (
       <div className="min-h-[100dvh] flex items-center justify-center bg-[#0f172a] overflow-hidden relative perspective-1000">
@@ -1711,50 +1697,6 @@ export default function App() {
                     <ArrowRight size={18} />
                   </span>
                 </button>
-
-                <div className="relative py-4">
-                  <div className="absolute inset-0 flex items-center">
-                    <div className="w-full border-t border-white/10"></div>
-                  </div>
-                  <div className="relative flex justify-center text-xs uppercase">
-                    <span className="bg-[#0f172a] px-2 text-slate-500 font-bold tracking-widest">Or secure access with</span>
-                  </div>
-                </div>
-
-                {!firebaseUser ? (
-                  <div className="space-y-4">
-                    <div className="p-3 bg-amber-500/10 border border-amber-500/20 rounded-xl flex items-start gap-3">
-                      <AlertCircle className="text-amber-500 shrink-0 mt-0.5" size={16} />
-                      <p className="text-[11px] text-amber-200/80 leading-relaxed">
-                        <b>Attention:</b> You must sign in with Google to access the development database. Without this, your data will not be saved.
-                      </p>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={handleGoogleLogin}
-                      className="w-full py-3.5 bg-white text-slate-900 rounded-xl font-bold hover:bg-slate-100 transition-all flex items-center justify-center gap-3 shadow-lg"
-                    >
-                      <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="Google" className="w-5 h-5" />
-                      Sign in with Google
-                    </button>
-                  </div>
-                ) : (
-                  <div className="flex items-center justify-between p-3 bg-indigo-500/10 rounded-xl border border-indigo-500/20">
-                    <div className="flex items-center gap-3">
-                      <img src={firebaseUser.photoURL} alt="" className="w-8 h-8 rounded-full border border-indigo-500/30" />
-                      <div className="min-w-0">
-                        <p className="text-xs font-bold text-white truncate">{firebaseUser.displayName}</p>
-                        <p className="text-[10px] text-indigo-300 truncate">{firebaseUser.email}</p>
-                      </div>
-                    </div>
-                    <button 
-                      onClick={handleFirebaseLogout}
-                      className="p-2 text-slate-400 hover:text-white transition-colors"
-                    >
-                      <LogOut size={16} />
-                    </button>
-                  </div>
-                )}
               </form>
             )}
           </div>

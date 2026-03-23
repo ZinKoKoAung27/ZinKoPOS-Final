@@ -19,32 +19,31 @@ service cloud.firestore {
     // ===============================================================
 
     match /products/{productId} {
-      allow read, write: if isAuthenticated();
+      allow read, write: if true;
     }
 
     match /sales/{saleId} {
-      allow read, write: if isAuthenticated();
+      allow read, write: if true;
     }
 
     match /expenses/{expenseId} {
-      allow read, write: if isAuthenticated();
+      allow read, write: if true;
     }
 
     match /customers/{customerId} {
-      allow read, write: if isAuthenticated();
+      allow read, write: if true;
     }
 
     match /branches/{branchId} {
-      allow read, write: if isAuthenticated();
+      allow read, write: if true;
     }
 
     match /staffAccounts/{staffId} {
-      allow read, write: if isAuthenticated();
+      allow read, write: if true;
     }
 
     match /settings/general {
-      allow read: if isAuthenticated();
-      allow write: if isAdmin();
+      allow read, write: if true;
     }
   }
 }

@@ -1,0 +1,114 @@
+{
+  "entities": {
+    "Product": {
+      "title": "Product",
+      "description": "Inventory product item",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "cost": { "type": "number" },
+        "price": { "type": "number" },
+        "stock": { "type": "number" },
+        "image": { "type": "string" },
+        "category": { "type": "string" },
+        "ram": { "type": "string" },
+        "storage": { "type": "string" },
+        "color": { "type": "string" },
+        "barcode": { "type": "string" },
+        "description": { "type": "string" },
+        "lastRestocked": { "type": "string" },
+        "branchId": { "type": "string" }
+      },
+      "required": ["name", "cost", "price", "stock", "category"]
+    },
+    "Sale": {
+      "title": "Sale",
+      "description": "Recorded sales transaction",
+      "type": "object",
+      "properties": {
+        "timestamp": { "type": "number" },
+        "items": { "type": "array" },
+        "totalAmount": { "type": "number" },
+        "totalCost": { "type": "number" },
+        "profit": { "type": "number" },
+        "discountType": { "type": "string" },
+        "discount": { "type": "number" },
+        "deliveryFee": { "type": "number" },
+        "paymentMethod": { "type": "string" },
+        "paidAmount": { "type": "number" },
+        "paymentStatus": { "type": "string" },
+        "customerName": { "type": "string" },
+        "customerPhone": { "type": "string" },
+        "customerId": { "type": "string" },
+        "branchId": { "type": "string" }
+      },
+      "required": ["timestamp", "items", "totalAmount", "totalCost", "profit"]
+    },
+    "Expense": {
+      "title": "Expense",
+      "description": "Business expense record",
+      "type": "object",
+      "properties": {
+        "timestamp": { "type": "number" },
+        "description": { "type": "string" },
+        "amount": { "type": "number" },
+        "category": { "type": "string" },
+        "branchId": { "type": "string" }
+      },
+      "required": ["timestamp", "description", "amount", "category"]
+    },
+    "Customer": {
+      "title": "Customer",
+      "description": "Customer profile",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "phone": { "type": "string" },
+        "email": { "type": "string" },
+        "address": { "type": "string" },
+        "createdAt": { "type": "number" },
+        "debt": { "type": "number" }
+      },
+      "required": ["name", "phone", "createdAt"]
+    },
+    "Branch": {
+      "title": "Branch",
+      "description": "Store branch",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" }
+      },
+      "required": ["name"]
+    },
+    "StaffAccount": {
+      "title": "StaffAccount",
+      "description": "Staff login credentials",
+      "type": "object",
+      "properties": {
+        "username": { "type": "string" },
+        "password": { "type": "string" },
+        "role": { "type": "string" },
+        "branchId": { "type": "string" }
+      },
+      "required": ["username", "password", "role"]
+    },
+    "Settings": {
+      "title": "Settings",
+      "description": "General application settings",
+      "type": "object",
+      "properties": {
+        "categories": { "type": "array" },
+        "adminCredentials": { "type": "object" }
+      }
+    }
+  },
+  "firestore": {
+    "/products": { "schema": "Product", "description": "Inventory collection" },
+    "/sales": { "schema": "Sale", "description": "Sales history" },
+    "/expenses": { "schema": "Expense", "description": "Expenses tracking" },
+    "/customers": { "schema": "Customer", "description": "Customer database" },
+    "/branches": { "schema": "Branch", "description": "Store branches" },
+    "/staffAccounts": { "schema": "StaffAccount", "description": "Staff accounts" },
+    "/settings/general": { "schema": "Settings", "description": "Global settings" }
+  }
+}

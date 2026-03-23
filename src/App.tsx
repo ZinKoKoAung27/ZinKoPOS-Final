@@ -41,14 +41,27 @@ import {
   Store,
   Clock,
   List,
-  Pause
+  Pause,
+  Code,
+  ChevronDown
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { GoogleGenAI } from "@google/genai";
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
-import { collection, doc, setDoc, deleteDoc, updateDoc, writeBatch, onSnapshot, increment } from 'firebase/firestore';
-import { db } from './firebase';
+import { 
+  collection, 
+  doc, 
+  setDoc, 
+  deleteDoc, 
+  updateDoc, 
+  writeBatch, 
+  onSnapshot, 
+  increment,
+  getDocFromServer
+} from 'firebase/firestore';
+import { signInWithPopup, GoogleAuthProvider, onAuthStateChanged, signOut } from 'firebase/auth';
+import { db, auth } from './firebase';
 import { useFirebaseSync } from './firebase-hooks';
 import * as htmlToImage from 'html-to-image';
 
@@ -686,7 +699,89 @@ const exportExpensesToCSV = (data: Expense[], t: any, branches: Branch[]) => {
   document.body.removeChild(link);
 };
 
+enum OperationType {
+  CREATE = 'create',
+  UPDATE = 'update',
+  DELETE = 'delete',
+  LIST = 'list',
+  GET = 'get',
+  WRITE = 'write',
+}
+
+interface FirestoreErrorInfo {
+  error: string;
+  operationType: OperationType;
+  path: string | null;
+  authInfo: {
+    userId: string | undefined;
+    email: string | null | undefined;
+    emailVerified: boolean | undefined;
+    isAnonymous: boolean | undefined;
+    tenantId: string | null | undefined;
+    providerInfo: {
+      providerId: string;
+      displayName: string | null;
+      email: string | null;
+      photoUrl: string | null;
+    }[];
+  }
+}
+
+function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
+  const errInfo: FirestoreErrorInfo = {
+    error: error instanceof Error ? error.message : String(error),
+    authInfo: {
+      userId: auth.currentUser?.uid,
+      email: auth.currentUser?.email,
+      emailVerified: auth.currentUser?.emailVerified,
+      isAnonymous: auth.currentUser?.isAnonymous,
+      tenantId: auth.currentUser?.tenantId,
+      providerInfo: auth.currentUser?.providerData.map(provider => ({
+        providerId: provider.providerId,
+        displayName: provider.displayName,
+        email: provider.email,
+        photoUrl: provider.photoURL
+      })) || []
+    },
+    operationType,
+    path
+  }
+  console.error('Firestore Error: ', JSON.stringify(errInfo));
+  throw new Error(JSON.stringify(errInfo));
+}
+
 export default function App() {
+  const [firebaseUser, setFirebaseUser] = useState<any>(null);
+  const [isFirebaseReady, setIsFirebaseReady] = useState(false);
+
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      setFirebaseUser(user);
+      setIsFirebaseReady(true);
+    });
+    return () => unsubscribe();
+  }, []);
+
+  const handleGoogleLogin = async () => {
+    const provider = new GoogleAuthProvider();
+    try {
+      await signInWithPopup(auth, provider);
+    } catch (error) {
+      console.error("Error signing in with Google:", error);
+    }
+  };
+
+  const handleFirebaseLogout = async () => {
+    try {
+      await signOut(auth);
+      setIsAuthenticated(false);
+      localStorage.removeItem('pos_auth');
+      localStorage.removeItem('pos_current_user');
+    } catch (error) {
+      console.error("Error signing out:", error);
+    }
+  };
+
   const [isAuthenticated, setIsAuthenticated] = useState(() => {
     const saved = localStorage.getItem('pos_auth');
     return saved ? JSON.parse(saved) : false;
@@ -728,6 +823,18 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<'dashboard' | 'products' | 'pos' | 'history' | 'settings' | 'expenses' | 'customers'>('pos');
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isCartOpen, setIsCartOpen] = useState(false);
+  const [isLanguageMenuOpen, setIsLanguageMenuOpen] = useState(false);
+  const languageMenuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (languageMenuRef.current && !languageMenuRef.current.contains(event.target as Node)) {
+        setIsLanguageMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
   
   const [darkMode, setDarkMode] = useState(() => {
     const saved = localStorage.getItem('pos_dark_mode');
@@ -750,44 +857,48 @@ export default function App() {
 
   const addCustomer = async (customerData: Omit<Customer, 'id' | 'createdAt'>) => {
     setIsAddCustomerOpen(false);
+    const path = 'customers';
     try {
-      const newCustomerRef = doc(collection(db, 'customers'));
+      const newCustomerRef = doc(collection(db, path));
       await setDoc(newCustomerRef, {
         ...customerData,
         createdAt: Date.now()
       });
     } catch (error) {
-      console.error("Error adding customer: ", error);
+      handleFirestoreError(error, OperationType.WRITE, path);
     }
   };
 
   const deleteCustomer = async (id: string) => {
+    const path = 'customers';
     try {
-      await deleteDoc(doc(db, 'customers', id));
+      await deleteDoc(doc(db, path, id));
     } catch (error) {
-      console.error("Error deleting customer: ", error);
+      handleFirestoreError(error, OperationType.DELETE, path);
     }
   };
 
   const addExpense = async (expenseData: Omit<Expense, 'id' | 'timestamp'>) => {
     setIsAddExpenseOpen(false);
+    const path = 'expenses';
     try {
-      const newExpenseRef = doc(collection(db, 'expenses'));
+      const newExpenseRef = doc(collection(db, path));
       await setDoc(newExpenseRef, {
         ...expenseData,
         timestamp: Date.now(),
         branchId: expenseData.branchId || (selectedBranchId === 'all' ? 'main' : selectedBranchId)
       });
     } catch (error) {
-      console.error("Error adding expense: ", error);
+      handleFirestoreError(error, OperationType.WRITE, path);
     }
   };
 
   const deleteExpense = async (id: string) => {
+    const path = 'expenses';
     try {
-      await deleteDoc(doc(db, 'expenses', id));
+      await deleteDoc(doc(db, path, id));
     } catch (error) {
-      console.error("Error deleting expense: ", error);
+      handleFirestoreError(error, OperationType.DELETE, path);
     }
   };
   
@@ -858,6 +969,11 @@ export default function App() {
 
   useEffect(() => {
     localStorage.setItem('pos_language', language);
+    if (language === 'mm') {
+      document.body.classList.add('lang-mm');
+    } else {
+      document.body.classList.remove('lang-mm');
+    }
   }, [language]);
 
   useEffect(() => {
@@ -1096,6 +1212,7 @@ export default function App() {
     }
 
     setIsCheckingOut(true);
+    const path = 'sales';
     try {
       const totalAmount = calculateTotalAmount();
       const totalCost = cartItems.reduce((sum, item) => sum + (item.product.cost * item.qty), 0);
@@ -1135,7 +1252,7 @@ export default function App() {
       const batch = writeBatch(db);
       
       // Add sale
-      batch.set(doc(db, 'sales', newSaleId), newSale);
+      batch.set(doc(db, path, newSaleId), newSale);
       
       // Update stock
       cartItems.forEach(item => {
@@ -1171,14 +1288,7 @@ export default function App() {
       setIsReceiptOpen(true);
       setIsCheckingOut(false);
     } catch (error: any) {
-      console.error("Detailed Checkout Error:", error);
-      let errorMessage = "An error occurred during checkout.";
-      if (error?.code === 'permission-denied') {
-        errorMessage = "Permission denied. Please check your Firestore security rules.";
-      } else if (error?.message) {
-        errorMessage = `Error: ${error.message}`;
-      }
-      setCheckoutError(errorMessage);
+      handleFirestoreError(error, OperationType.WRITE, path);
       setIsCheckingOut(false);
     }
   };
@@ -1248,12 +1358,11 @@ export default function App() {
     };
     // Close modal immediately for better UX
     setIsAddProductOpen(false);
+    const path = 'products';
     try {
-      await setDoc(doc(db, 'products', newProductId), newProduct);
+      await setDoc(doc(db, path, newProductId), newProduct);
     } catch (error) {
-      console.error("Error adding product:", error);
-      alert("Error adding product. Please try again.");
-      // Re-open modal if failed? Maybe just a toast is better, but let's keep it simple.
+      handleFirestoreError(error, OperationType.WRITE, path);
     }
   };
 
@@ -1263,16 +1372,25 @@ export default function App() {
     const oldStock = editingProduct.stock;
     // Close modal immediately
     setEditingProduct(null);
+    const path = 'products';
     try {
       const updateData: Partial<Product> = { ...product };
       // If stock increased, update lastRestocked
       if (product.stock > oldStock) {
         updateData.lastRestocked = new Date().toISOString();
       }
-      await updateDoc(doc(db, 'products', productId), updateData);
+      await updateDoc(doc(db, path, productId), updateData);
     } catch (error) {
-      console.error("Error updating product:", error);
-      alert("Error updating product. Please try again.");
+      handleFirestoreError(error, OperationType.UPDATE, path);
+    }
+  };
+
+  const deleteProduct = async (id: string) => {
+    const path = 'products';
+    try {
+      await deleteDoc(doc(db, path, id));
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, path);
     }
   };
 
@@ -1593,6 +1711,50 @@ export default function App() {
                     <ArrowRight size={18} />
                   </span>
                 </button>
+
+                <div className="relative py-4">
+                  <div className="absolute inset-0 flex items-center">
+                    <div className="w-full border-t border-white/10"></div>
+                  </div>
+                  <div className="relative flex justify-center text-xs uppercase">
+                    <span className="bg-[#0f172a] px-2 text-slate-500 font-bold tracking-widest">Or secure access with</span>
+                  </div>
+                </div>
+
+                {!firebaseUser ? (
+                  <div className="space-y-4">
+                    <div className="p-3 bg-amber-500/10 border border-amber-500/20 rounded-xl flex items-start gap-3">
+                      <AlertCircle className="text-amber-500 shrink-0 mt-0.5" size={16} />
+                      <p className="text-[11px] text-amber-200/80 leading-relaxed">
+                        <b>Attention:</b> You must sign in with Google to access the development database. Without this, your data will not be saved.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleGoogleLogin}
+                      className="w-full py-3.5 bg-white text-slate-900 rounded-xl font-bold hover:bg-slate-100 transition-all flex items-center justify-center gap-3 shadow-lg"
+                    >
+                      <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="Google" className="w-5 h-5" />
+                      Sign in with Google
+                    </button>
+                  </div>
+                ) : (
+                  <div className="flex items-center justify-between p-3 bg-indigo-500/10 rounded-xl border border-indigo-500/20">
+                    <div className="flex items-center gap-3">
+                      <img src={firebaseUser.photoURL} alt="" className="w-8 h-8 rounded-full border border-indigo-500/30" />
+                      <div className="min-w-0">
+                        <p className="text-xs font-bold text-white truncate">{firebaseUser.displayName}</p>
+                        <p className="text-[10px] text-indigo-300 truncate">{firebaseUser.email}</p>
+                      </div>
+                    </div>
+                    <button 
+                      onClick={handleFirebaseLogout}
+                      className="p-2 text-slate-400 hover:text-white transition-colors"
+                    >
+                      <LogOut size={16} />
+                    </button>
+                  </div>
+                )}
               </form>
             )}
           </div>
@@ -1711,37 +1873,6 @@ export default function App() {
         </div>
 
         <div className="p-4 space-y-4 border-t border-white/10">
-          <div className="space-y-2">
-            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-2">{t.settings}</p>
-
-            <div className="flex items-center justify-between px-2 py-1">
-              <span className="text-xs font-bold text-slate-300 flex items-center gap-2">
-                <Globe size={14} />
-                {t.language}
-              </span>
-              <div className="flex bg-white/10 rounded-lg p-0.5">
-                <button 
-                  onClick={() => setLanguage('mm')}
-                  className={cn(
-                    "px-2 py-1 text-[10px] font-bold rounded-md transition-all",
-                    language === 'mm' ? "bg-white text-slate-900 shadow-lg" : "text-slate-400"
-                  )}
-                >
-                  MM
-                </button>
-                <button 
-                  onClick={() => setLanguage('en')}
-                  className={cn(
-                    "px-2 py-1 text-[10px] font-bold rounded-md transition-all",
-                    language === 'en' ? "bg-white text-indigo-900 shadow-lg" : "text-slate-400"
-                  )}
-                >
-                  EN
-                </button>
-              </div>
-            </div>
-          </div>
-          
           <button
             onClick={() => {
               setIsAuthenticated(false);
@@ -1755,55 +1886,104 @@ export default function App() {
             {t.logout}
           </button>
 
-          <div className="mt-6 text-center border-t border-white/10 pt-4">
-            <p className="text-[10px] text-white/40 font-medium tracking-wider uppercase">
-              Developed by
-            </p>
-            <p className="text-xs text-white/70 font-bold tracking-wide mt-0.5">
-              Zin Ko Ko Aung
-            </p>
+          <div className="mt-auto pt-6 border-t border-white/10">
+            <div className="bg-black/20 rounded-2xl p-4 flex items-center gap-3 border border-white/5">
+              <div className="w-10 h-10 rounded-xl bg-white/10 flex items-center justify-center shadow-inner">
+                <Code size={18} className="text-white/60" />
+              </div>
+              <div>
+                <p className="text-[9px] uppercase tracking-[0.2em] text-white/40 font-black leading-none mb-1">
+                  Developed by
+                </p>
+                <p className="text-xs text-white font-black tracking-tight">
+                  Zin Ko Ko Aung
+                </p>
+              </div>
+            </div>
           </div>
         </div>
       </aside>
 
       <main className="flex-1 flex flex-col overflow-hidden w-full bg-slate-50 dark:bg-slate-950">
-        <header className="h-16 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between px-4 lg:px-8 shrink-0">
-          <div className="flex items-center gap-4">
+        <header className="h-16 bg-white/80 dark:bg-slate-900/80 backdrop-blur-md border-b border-slate-200 dark:border-slate-800 flex items-center justify-between px-4 lg:px-6 shrink-0 sticky top-0 z-30 shadow-sm">
+          <div className="flex items-center gap-3">
             <button 
               onClick={() => setIsSidebarOpen(true)}
-              className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg lg:hidden text-slate-600 dark:text-slate-400"
+              className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl lg:hidden text-slate-600 dark:text-slate-400 transition-all"
             >
-              <Menu size={24} />
+              <Menu size={22} />
             </button>
-            <h2 className="text-lg font-semibold text-slate-800 dark:text-white capitalize hidden sm:block">
+            <h2 className="text-lg font-bold text-slate-800 dark:text-white tracking-tight hidden sm:block">
               {t[activeTab as keyof typeof t] || activeTab}
             </h2>
           </div>
           
           <div className="flex items-center gap-2 sm:gap-4 flex-1 justify-end">
+            <div className="relative" ref={languageMenuRef}>
+              <button 
+                onClick={() => setIsLanguageMenuOpen(!isLanguageMenuOpen)}
+                className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full text-slate-600 dark:text-slate-400 transition-all flex items-center justify-center"
+                title={t.language}
+              >
+                <Globe size={20} />
+              </button>
+              
+              <AnimatePresence>
+                {isLanguageMenuOpen && (
+                  <motion.div 
+                    initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    exit={{ opacity: 0, y: 10, scale: 0.95 }}
+                    className="absolute right-0 mt-2 w-32 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-xl z-50 overflow-hidden"
+                  >
+                    <button 
+                      onClick={() => { setLanguage('mm'); setIsLanguageMenuOpen(false); }}
+                      className={cn(
+                        "w-full px-4 py-2.5 text-xs font-bold text-left transition-colors flex items-center justify-between",
+                        language === 'mm' ? "bg-indigo-50 dark:bg-indigo-500/10 text-indigo-600 dark:text-indigo-400" : "text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700/50"
+                      )}
+                    >
+                      မြန်မာ (MM)
+                      {language === 'mm' && <CheckCircle2 size={14} />}
+                    </button>
+                    <button 
+                      onClick={() => { setLanguage('en'); setIsLanguageMenuOpen(false); }}
+                      className={cn(
+                        "w-full px-4 py-2.5 text-xs font-bold text-left transition-colors flex items-center justify-between",
+                        language === 'en' ? "bg-indigo-50 dark:bg-indigo-500/10 text-indigo-600 dark:text-indigo-400" : "text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700/50"
+                      )}
+                    >
+                      English (EN)
+                      {language === 'en' && <CheckCircle2 size={14} />}
+                    </button>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
+
             <button 
               onClick={() => setDarkMode(!darkMode)}
-              className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full text-slate-600 dark:text-slate-400 transition-colors"
+              className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full text-slate-600 dark:text-slate-400 transition-all hover:rotate-12"
               title={darkMode ? t.lightMode : t.darkMode}
             >
               {darkMode ? <Sun size={20} /> : <Moon size={20} />}
             </button>
-            <div className="relative flex-1 max-w-xs sm:max-w-sm">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-500" size={18} />
+            <div className="relative flex-1 max-w-[200px] sm:max-w-xs group">
+              <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-indigo-500 transition-colors" size={18} />
               <input 
                 type="text" 
                 placeholder={t.searchProducts} 
-                className="pl-10 pr-4 py-2 bg-slate-100 dark:bg-slate-800 border-none rounded-full text-sm focus:ring-2 focus:ring-indigo-500 w-full transition-all text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-slate-500"
+                className="pl-10 pr-4 py-2 bg-slate-100 dark:bg-slate-800 border-2 border-transparent focus:border-indigo-500/30 rounded-full text-sm focus:ring-4 focus:ring-indigo-500/10 w-full transition-all text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-slate-500 shadow-inner"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
               />
             </div>
-            <div className="hidden sm:flex items-center gap-3 pl-4 border-l border-slate-200 dark:border-slate-700">
+            <div className="hidden sm:flex items-center gap-3 pl-4 border-l border-slate-200 dark:border-slate-800">
               <div className="text-right">
-                <p className="text-sm font-medium text-slate-900 dark:text-white leading-tight">{currentUser?.username}</p>
-                <p className="text-[10px] text-slate-500 dark:text-slate-400 font-medium uppercase tracking-wider">{currentUser?.role === 'admin' ? t.admin : t.staff}</p>
+                <p className="text-sm font-bold text-slate-900 dark:text-white leading-tight">{currentUser?.username}</p>
+                <p className="text-[10px] text-slate-500 dark:text-slate-400 font-bold uppercase tracking-widest opacity-70">{currentUser?.role === 'admin' ? t.admin : t.staff}</p>
               </div>
-              <div className="w-8 h-8 rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-slate-700 dark:text-slate-300 font-bold text-sm">
+              <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center text-white font-black text-sm shadow-lg shadow-indigo-500/20 transform hover:scale-105 transition-transform">
                 {currentUser?.username?.charAt(0).toUpperCase()}
               </div>
             </div>
@@ -1823,7 +2003,10 @@ export default function App() {
           </div>
         </header>
 
-        <div className="flex-1 overflow-hidden flex flex-col">
+        <div className="flex-1 overflow-hidden flex flex-col relative">
+          {/* Subtle top gradient for depth */}
+          <div className="absolute top-0 left-0 right-0 h-4 bg-gradient-to-b from-slate-200/20 dark:from-black/20 to-transparent pointer-events-none z-20" />
+          
           <AnimatePresence mode="wait">
             {activeTab === 'dashboard' && (
               <motion.div 
@@ -1831,21 +2014,21 @@ export default function App() {
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -10 }}
-                className="space-y-6 lg:space-y-8 h-full overflow-y-auto p-4 lg:p-8"
+                className="space-y-4 h-full overflow-y-auto p-4 lg:p-6 pb-20"
               >
                 <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 lg:gap-5">
-                  <StatCard title={t.totalSales} value={stats.totalSales} icon={<DollarSign size={24} />} color="sky" unit="MMK" />
+                  <StatCard title={t.totalSales} value={stats.totalSales} icon={<DollarSign size={18} />} color="sky" unit="MMK" />
                   {currentUser?.role === 'admin' && (
                     <>
-                      <StatCard title={t.totalProfit} value={stats.totalProfit} icon={<TrendingUp size={24} />} color="emerald" unit="MMK" />
-                      <StatCard title={t.totalExpenses} value={stats.totalExpenses} icon={<Wallet size={24} />} color="rose" unit="MMK" />
-                      <StatCard title={t.netProfit} value={stats.netProfit} icon={<CheckCircle2 size={24} />} color="indigo" unit="MMK" />
+                      <StatCard title={t.totalProfit} value={stats.totalProfit} icon={<TrendingUp size={18} />} color="emerald" unit="MMK" />
+                      <StatCard title={t.totalExpenses} value={stats.totalExpenses} icon={<Wallet size={18} />} color="rose" unit="MMK" />
+                      <StatCard title={t.netProfit} value={stats.netProfit} icon={<CheckCircle2 size={18} />} color="indigo" unit="MMK" />
                     </>
                   )}
                 </div>
                 <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 lg:gap-5">
-                  <StatCard title={t.inventoryValue} value={stats.inventoryValue} icon={<Package size={24} />} color="amber" unit="MMK" />
-                  <StatCard title={t.totalOrders} value={sales.length} icon={<ShoppingBag size={24} />} color="violet" unit={t.items} />
+                  <StatCard title={t.inventoryValue} value={stats.inventoryValue} icon={<Package size={18} />} color="amber" unit="MMK" />
+                  <StatCard title={t.totalOrders} value={sales.length} icon={<ShoppingBag size={18} />} color="violet" unit={t.items} />
                 </div>
 
                 <div className="grid grid-cols-1 gap-6 lg:gap-8">
@@ -1873,8 +2056,13 @@ export default function App() {
                               )}
                             </div>
                             <div className="min-w-0">
-                              <p className="font-black text-slate-900 dark:text-white truncate">{product.name}</p>
-                              <p className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest truncate">{product.category}</p>
+                              <p className="font-black text-slate-900 dark:text-white truncate text-base">{product.name}</p>
+                              <div className="flex flex-wrap gap-1.5 mt-1.5">
+                                <p className="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest truncate">{product.category}</p>
+                                {product.ram && <span className="text-[10px] font-black text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-900/30 px-2 rounded border border-indigo-100 dark:border-indigo-800/50">{product.ram}</span>}
+                                {product.storage && <span className="text-[10px] font-black text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/30 px-2 rounded border border-amber-100 dark:border-amber-800/50">{product.storage}</span>}
+                                {product.color && <span className="text-[10px] font-black text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-900/30 px-2 rounded border border-rose-100 dark:border-rose-800/50">{product.color}</span>}
+                              </div>
                             </div>
                           </div>
                           <div className="text-right shrink-0 ml-4">
@@ -1907,70 +2095,73 @@ export default function App() {
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 exit={{ opacity: 0 }}
-                className="flex flex-col lg:flex-row gap-6 lg:gap-8 h-full overflow-hidden p-4 lg:p-8"
+                className="flex flex-col lg:flex-row gap-4 lg:gap-6 h-full overflow-hidden p-4 lg:p-6 pb-20"
               >
                 {/* Product Selection */}
-                <div className="flex-1 space-y-6 overflow-y-auto pr-0 lg:pr-2">
-                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-3">
+                <div className="flex-1 space-y-2 overflow-y-auto pr-0 lg:pr-2">
+                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-3">
                     {filteredProducts.map(product => (
                       <motion.button 
                         key={product.id}
                         layout
                         initial={{ opacity: 0, scale: 0.9 }}
                         animate={{ opacity: 1, scale: 1 }}
-                        whileHover={{ y: -5 }}
+                        whileHover={{ y: -2, scale: 1.01 }}
                         whileTap={{ scale: 0.98 }}
                         onClick={() => addToCart(product.id)}
                         disabled={product.stock === 0}
                         className={cn(
-                          "bg-white dark:bg-slate-900 p-2 rounded-2xl border border-slate-200 dark:border-slate-800 text-left group relative flex flex-col transition-all duration-200 shadow-sm hover:shadow-lg hover:border-indigo-500/50 dark:hover:border-indigo-500/50",
+                          "bg-white dark:bg-slate-900 p-2 rounded-2xl border border-slate-100 dark:border-slate-800 text-left group relative flex flex-col transition-all duration-200 shadow-sm hover:shadow-lg hover:border-indigo-500/30 dark:hover:border-indigo-500/30",
                           product.stock === 0 && "opacity-60 grayscale cursor-not-allowed"
                         )}
                       >
-                        <div className="aspect-square bg-slate-100 dark:bg-slate-800 rounded-xl mb-1.5 overflow-hidden relative w-full border border-slate-100 dark:border-slate-700">
+                        <div className="aspect-square bg-slate-50/50 dark:bg-slate-800/50 rounded-xl mb-2 overflow-hidden relative w-full border border-slate-50 dark:border-slate-700/50 flex items-center justify-center p-1">
                           {product.image ? (
-                            <img src={product.image} alt={product.name} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" referrerPolicy="no-referrer" />
+                            <img 
+                              src={product.image} 
+                              alt={product.name} 
+                              className="max-w-full max-h-full object-contain group-hover:scale-110 transition-transform duration-500 drop-shadow-sm" 
+                              referrerPolicy="no-referrer" 
+                            />
                           ) : (
                             <div className="w-full h-full flex items-center justify-center text-slate-300 dark:text-slate-600">
-                              <ImageIcon size={28} />
+                              <ImageIcon size={24} />
                             </div>
                           )}
                         </div>
-                        <div className="px-0.5 flex flex-col flex-1 min-h-0">
-                          <h4 className="font-bold text-slate-800 dark:text-slate-100 text-sm leading-tight mb-0.5 line-clamp-2 h-8" title={product.name}>{product.name}</h4>
+                        <div className="flex flex-col flex-1 min-w-0">
+                          <h4 className="font-bold text-slate-900 dark:text-white text-[12px] mb-0.5 truncate" title={product.name}>{product.name}</h4>
                           
                           <div className="flex items-center justify-between mb-1">
-                            <p className="text-[10px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider truncate">{product.category}</p>
+                            <p className="text-[8px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-tight truncate">{product.category}</p>
                             <span className={cn(
-                              "text-[9px] px-1.5 py-0.5 rounded-md font-bold",
+                              "text-[8px] px-1.5 py-0.5 rounded-full font-bold",
                               product.stock > 10 
                                 ? "bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400" 
                                 : "bg-amber-100 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400"
                             )}>
-                              {product.stock} {t.left}
+                              {product.stock}
                             </span>
                           </div>
                           
-                          {(product.ram || product.storage || product.color) && (
-                            <div className="flex flex-wrap gap-1 mb-1">
-                              {product.ram && <span className="text-[9px] px-1.5 py-0.5 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 rounded-md font-medium">{product.ram}</span>}
-                              {product.storage && <span className="text-[9px] px-1.5 py-0.5 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 rounded-md font-medium">{product.storage}</span>}
-                              {product.color && <span className="text-[9px] px-1.5 py-0.5 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 rounded-md font-medium">{product.color}</span>}
-                            </div>
-                          )}
+                          <div className="flex items-center gap-1 mb-2 flex-nowrap overflow-hidden">
+                            {product.ram && <span className="text-[8px] px-1.5 py-0.5 bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 rounded-md border border-indigo-100 dark:border-indigo-800/50 font-bold whitespace-nowrap shrink-0">{product.ram}</span>}
+                            {product.storage && <span className="text-[8px] px-1.5 py-0.5 bg-amber-50 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400 rounded-md border border-amber-100 dark:border-amber-800/50 font-bold whitespace-nowrap shrink-0">{product.storage}</span>}
+                            {product.color && <span className="text-[8px] px-1.5 py-0.5 bg-rose-50 dark:bg-rose-900/30 text-rose-600 dark:text-rose-400 rounded-md border border-rose-100 dark:border-rose-800/50 font-bold whitespace-nowrap shrink-0">{product.color}</span>}
+                          </div>
                           
-                          <div className="flex items-center justify-between mt-auto pt-1.5 border-t border-slate-100 dark:border-slate-800/50">
-                            <p className="text-indigo-600 dark:text-indigo-400 font-extrabold text-base">
-                              {product.price.toLocaleString()} <span className="text-[10px] font-bold text-indigo-400 dark:text-indigo-500">MMK</span>
+                          <div className="flex items-center justify-between mt-auto">
+                            <p className="text-indigo-600 dark:text-indigo-400 font-bold text-[13px]">
+                              {product.price.toLocaleString()} <span className="text-[8px] font-bold text-indigo-400 dark:text-indigo-500 ml-0.5 uppercase">MMK</span>
                             </p>
-                            <div className="w-7 h-7 bg-slate-100 dark:bg-slate-800 rounded-lg flex items-center justify-center text-slate-500 dark:text-slate-400 group-hover:bg-indigo-600 group-hover:text-white transition-all duration-200 shadow-sm">
-                              <Plus size={16} strokeWidth={3} />
+                            <div className="w-7 h-7 bg-slate-50 dark:bg-slate-800 rounded-lg flex items-center justify-center text-slate-400 dark:text-slate-500 group-hover:bg-indigo-600 group-hover:text-white transition-all duration-200 shadow-sm border border-slate-100 dark:border-slate-700">
+                              <Plus size={12} strokeWidth={3} />
                             </div>
                           </div>
                         </div>
                         {product.stock === 0 && (
                           <div className="absolute inset-0 flex items-center justify-center bg-white/50 dark:bg-slate-900/50 backdrop-blur-[1px] rounded-2xl z-10">
-                            <span className="bg-slate-900 dark:bg-white text-white dark:text-slate-900 text-[10px] px-3 py-1.5 rounded-full font-bold uppercase tracking-wider shadow-lg transform -rotate-6">{t.outOfStock}</span>
+                            <span className="bg-slate-900 dark:bg-white text-white dark:text-slate-900 text-[8px] px-2 py-1 rounded-full font-bold uppercase tracking-wider shadow-lg transform -rotate-6">{t.outOfStock}</span>
                           </div>
                         )}
                       </motion.button>
@@ -1985,7 +2176,7 @@ export default function App() {
                 </div>
 
                 {/* Cart (Desktop) */}
-                <div className="hidden lg:flex w-80 xl:w-96 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xl flex-col overflow-hidden shrink-0">
+                <div className="hidden lg:flex w-72 xl:w-80 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xl flex-col overflow-hidden shrink-0">
                   <CartContent 
                     cartItems={cartItems} 
                     cartTotal={cartTotal} 
@@ -2100,9 +2291,9 @@ export default function App() {
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 exit={{ opacity: 0 }}
-                className="space-y-6 h-full overflow-y-auto p-4 lg:p-8"
+                className="flex flex-col h-full p-4 lg:p-6 overflow-hidden pb-20"
               >
-                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 px-2 mb-4 shrink-0">
                   <h3 className="text-xl font-bold text-slate-900 dark:text-white">{t.inventory}</h3>
                   <div className="flex flex-wrap items-center gap-3 w-full sm:w-auto">
                     <button 
@@ -2122,54 +2313,54 @@ export default function App() {
                   </div>
                 </div>
 
-                <div className="bg-white dark:bg-slate-900/80 rounded-xl border-2 border-slate-300 dark:border-slate-800 shadow-sm overflow-hidden backdrop-blur-xl">
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-left border-collapse min-w-[800px]">
-                      <thead>
-                        <tr className="bg-slate-200 dark:bg-slate-800/20 border-b-2 border-slate-300 dark:border-slate-700/50">
-                          <th className="px-6 py-4 text-xs font-bold text-slate-800 dark:text-slate-300 uppercase tracking-wider">{t.product}</th>
-                          <th className="px-6 py-4 text-xs font-bold text-slate-800 dark:text-slate-300 uppercase tracking-wider">{t.category}</th>
-                          <th className="px-6 py-4 text-xs font-bold text-slate-800 dark:text-slate-300 uppercase tracking-wider">{t.cost}</th>
-                          <th className="px-6 py-4 text-xs font-bold text-slate-800 dark:text-slate-300 uppercase tracking-wider">{t.price}</th>
-                          <th className="px-6 py-4 text-xs font-bold text-slate-800 dark:text-slate-300 uppercase tracking-wider">{t.stock}</th>
-                          <th className="px-6 py-4 text-xs font-bold text-slate-800 dark:text-slate-300 uppercase tracking-wider">Restocked</th>
-                          <th className="px-6 py-4 text-xs font-bold text-slate-800 dark:text-slate-300 uppercase tracking-wider">{t.profitUnit}</th>
-                          <th className="px-6 py-4 text-xs font-bold text-slate-800 dark:text-slate-300 uppercase tracking-wider">Description</th>
-                          <th className="px-6 py-4 text-xs font-bold text-slate-800 dark:text-slate-300 uppercase tracking-wider text-right">{t.actions}</th>
+                <div className="bg-white dark:bg-slate-900/80 rounded-xl border-2 border-slate-300 dark:border-slate-800 shadow-sm overflow-hidden backdrop-blur-xl mx-2 flex-1 flex flex-col min-h-0">
+                  <div className="overflow-auto flex-1">
+                    <table className="w-full text-left border-collapse min-w-[700px]">
+                      <thead className="sticky top-0 z-10 bg-slate-200 dark:bg-slate-800 shadow-sm">
+                        <tr className="border-b-2 border-slate-300 dark:border-slate-700/50">
+                          <th className="px-3 py-3 text-[10px] font-bold text-slate-800 dark:text-slate-300 uppercase tracking-wider bg-slate-200 dark:bg-slate-800">{t.product}</th>
+                          <th className="px-3 py-3 text-[10px] font-bold text-slate-800 dark:text-slate-300 uppercase tracking-wider bg-slate-200 dark:bg-slate-800">{t.category}</th>
+                          <th className="px-3 py-3 text-[10px] font-bold text-slate-800 dark:text-slate-300 uppercase tracking-wider bg-slate-200 dark:bg-slate-800">{t.cost}</th>
+                          <th className="px-3 py-3 text-[10px] font-bold text-slate-800 dark:text-slate-300 uppercase tracking-wider bg-slate-200 dark:bg-slate-800">{t.price}</th>
+                          <th className="px-3 py-3 text-[10px] font-bold text-slate-800 dark:text-slate-300 uppercase tracking-wider bg-slate-200 dark:bg-slate-800">{t.stock}</th>
+                          <th className="px-3 py-3 text-[10px] font-bold text-slate-800 dark:text-slate-300 uppercase tracking-wider bg-slate-200 dark:bg-slate-800">Restocked</th>
+                          <th className="px-3 py-3 text-[10px] font-bold text-slate-800 dark:text-slate-300 uppercase tracking-wider bg-slate-200 dark:bg-slate-800">{t.profitUnit}</th>
+                          <th className="px-3 py-3 text-[10px] font-bold text-slate-800 dark:text-slate-300 uppercase tracking-wider bg-slate-200 dark:bg-slate-800">Description</th>
+                          <th className="px-3 py-3 text-[10px] font-bold text-slate-800 dark:text-slate-300 uppercase tracking-wider text-right bg-slate-200 dark:bg-slate-800">{t.actions}</th>
                         </tr>
                       </thead>
                     <tbody className="divide-y-2 divide-slate-300 dark:divide-slate-800/60">
-                        {products.map(product => (
+                        {filteredProducts.map(product => (
                           <tr key={product.id} className="hover:bg-slate-100 dark:hover:bg-slate-800/50 transition-colors group">
-                            <td className="px-6 py-4">
-                              <div className="flex items-center gap-4">
-                                <div className="w-12 h-12 bg-white dark:bg-slate-800 rounded-lg overflow-hidden shrink-0 shadow-sm border border-slate-300 dark:border-slate-700">
+                            <td className="px-3 py-3">
+                              <div className="flex items-center gap-3">
+                                <div className="w-10 h-10 bg-white dark:bg-slate-800 rounded-lg overflow-hidden shrink-0 shadow-sm border border-slate-300 dark:border-slate-700">
                                   {product.image ? (
-                                    <img src={product.image} alt={product.name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                                    <img src={product.image} alt={product.name} className="w-full h-full object-contain" referrerPolicy="no-referrer" />
                                   ) : (
-                                    <div className="w-full h-full flex items-center justify-center text-slate-300 dark:text-slate-600"><ImageIcon size={20} /></div>
+                                    <div className="w-full h-full flex items-center justify-center text-slate-300 dark:text-slate-600"><ImageIcon size={18} /></div>
                                   )}
                                 </div>
                                 <div className="min-w-0">
-                                  <span className="font-semibold text-slate-900 dark:text-white truncate block max-w-[200px]">{product.name}</span>
+                                  <span className="font-black text-slate-900 dark:text-white truncate block max-w-[180px] text-sm">{product.name}</span>
                                   <div className="flex flex-wrap gap-1 mt-1">
-                                    {product.ram && <span className="text-[10px] text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-slate-800 px-1 rounded border border-slate-200 dark:border-slate-700">{product.ram}</span>}
-                                    {product.storage && <span className="text-[10px] text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-slate-800 px-1 rounded border border-slate-200 dark:border-slate-700">{product.storage}</span>}
-                                    {product.color && <span className="text-[10px] text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-slate-800 px-1 rounded border border-slate-200 dark:border-slate-700">{product.color}</span>}
+                                    {product.ram && <span className="text-[10px] font-black text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-900/30 px-2 rounded border border-indigo-100 dark:border-indigo-800/50">{product.ram}</span>}
+                                    {product.storage && <span className="text-[10px] font-black text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/30 px-2 rounded border border-amber-100 dark:border-amber-800/50">{product.storage}</span>}
+                                    {product.color && <span className="text-[10px] font-black text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-900/30 px-2 rounded border border-rose-100 dark:border-rose-800/50">{product.color}</span>}
                                   </div>
                                 </div>
                               </div>
                             </td>
-                            <td className="px-6 py-4">
-                              <span className="px-2.5 py-1 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 rounded-md text-xs font-medium border border-slate-200 dark:border-slate-700">
+                            <td className="px-3 py-3">
+                              <span className="px-2 py-0.5 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 rounded-md text-[10px] font-medium border border-slate-200 dark:border-slate-700">
                                 {product.category}
                               </span>
                             </td>
-                            <td className="px-6 py-4 text-slate-500 dark:text-slate-400 font-medium text-sm">{product.cost.toLocaleString()}</td>
-                            <td className="px-6 py-4 text-slate-900 dark:text-white font-semibold text-sm">{product.price.toLocaleString()}</td>
-                            <td className="px-6 py-4">
+                            <td className="px-3 py-3 text-slate-500 dark:text-slate-400 font-medium text-xs">{product.cost.toLocaleString()}</td>
+                            <td className="px-3 py-3 text-slate-900 dark:text-white font-semibold text-xs">{product.price.toLocaleString()}</td>
+                            <td className="px-3 py-3">
                               <span className={cn(
-                                "font-semibold text-sm px-2.5 py-1 rounded-md inline-block min-w-[3rem] text-center",
+                                "font-semibold text-xs px-2 py-0.5 rounded-md inline-block min-w-[2.5rem] text-center",
                                 product.stock < 10 
                                   ? "bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 border border-red-200 dark:border-red-800/50" 
                                   : "bg-emerald-50 dark:bg-emerald-900/20 text-emerald-600 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800/50"
@@ -2177,51 +2368,51 @@ export default function App() {
                                 {product.stock}
                               </span>
                             </td>
-                            <td className="px-6 py-4">
+                            <td className="px-3 py-3">
                               {product.lastRestocked ? (
                                 <div className="flex flex-col">
-                                  <span className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+                                  <span className="text-[10px] font-semibold text-slate-700 dark:text-slate-300">
                                     {new Date(product.lastRestocked).toLocaleDateString(language === 'mm' ? 'my-MM' : 'en-US')}
                                   </span>
-                                  <span className="text-[10px] text-slate-500 dark:text-slate-400">
+                                  <span className="text-[9px] text-slate-500 dark:text-slate-400">
                                     {new Date(product.lastRestocked).toLocaleTimeString(language === 'mm' ? 'my-MM' : 'en-US', { hour: '2-digit', minute: '2-digit' })}
                                   </span>
                                 </div>
                               ) : (
-                                <span className="text-sm text-slate-400 dark:text-slate-500">-</span>
+                                <span className="text-xs text-slate-400 dark:text-slate-500">-</span>
                               )}
                             </td>
-                            <td className="px-6 py-4">
-                              <span className="text-emerald-600 dark:text-emerald-400 font-medium text-sm">
+                            <td className="px-3 py-3">
+                              <span className="text-emerald-600 dark:text-emerald-400 font-medium text-xs">
                                 +{(product.price - product.cost).toLocaleString()}
                               </span>
                             </td>
-                            <td className="px-6 py-4">
-                              <span className="text-sm text-slate-500 dark:text-slate-400 block max-w-[200px] truncate" title={product.description}>
+                            <td className="px-3 py-3">
+                              <span className="text-xs text-slate-500 dark:text-slate-400 block max-w-[150px] truncate" title={product.description}>
                                 {product.description || '-'}
                               </span>
                             </td>
-                            <td className="px-6 py-4 text-right">
-                              <div className="flex items-center justify-end gap-2">
+                            <td className="px-3 py-3 text-right">
+                              <div className="flex items-center justify-end gap-1.5">
                                 <button 
                                   onClick={() => setEditingProduct(product)}
-                                  className="p-2 bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400 rounded-md hover:bg-indigo-100 dark:hover:bg-indigo-900/40 transition-colors border border-indigo-200 dark:border-indigo-800/50"
+                                  className="p-1.5 bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400 rounded-md hover:bg-indigo-100 dark:hover:bg-indigo-900/40 transition-colors border border-indigo-200 dark:border-indigo-800/50"
                                   title="Edit Product"
                                 >
-                                  <Pencil size={16} />
+                                  <Pencil size={14} />
                                 </button>
                                 <button 
                                   onClick={() => setRestockProductId(product.id)}
-                                  className="p-2 bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-300 rounded-md hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors border border-slate-200 dark:border-slate-700"
+                                  className="p-1.5 bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-300 rounded-md hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors border border-slate-200 dark:border-slate-700"
                                   title={t.restock}
                                 >
-                                  <Plus size={16} />
+                                  <Plus size={14} />
                                 </button>
                                 <button 
                                   onClick={() => setProductToDelete(product.id)}
-                                  className="p-2 bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 rounded-md hover:bg-red-100 dark:hover:bg-red-900/40 transition-colors border border-red-200 dark:border-red-800/50"
+                                  className="p-1.5 bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 rounded-md hover:bg-red-100 dark:hover:bg-red-900/40 transition-colors border border-red-200 dark:border-red-800/50"
                                 >
-                                  <Trash2 size={16} />
+                                  <Trash2 size={14} />
                                 </button>
                               </div>
                             </td>
@@ -2229,7 +2420,7 @@ export default function App() {
                         ))}
                       </tbody>
                   </table>
-                  {products.length === 0 && (
+                  {filteredProducts.length === 0 && (
                     <div className="text-center py-20">
                       <Package className="mx-auto text-slate-200 dark:text-slate-800 mb-4" size={64} />
                       <p className="text-slate-400 font-bold italic">{t.noProductsInventory}</p>
@@ -2246,9 +2437,9 @@ export default function App() {
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 exit={{ opacity: 0 }}
-                className="space-y-6 h-full overflow-y-auto p-4 lg:p-8"
+                className="flex flex-col h-full p-4 lg:p-6 overflow-hidden pb-20"
               >
-                <div className="flex flex-col gap-6">
+                <div className="flex flex-col gap-6 shrink-0 mb-6">
                   <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
                     <h3 className="text-xl font-black text-slate-900 dark:text-white uppercase tracking-widest">{t.salesHistory}</h3>
                     <div className="flex flex-wrap items-center gap-3">
@@ -2342,7 +2533,7 @@ export default function App() {
                   </div>
                 </div>
 
-                <div className="space-y-4">
+                <div className="space-y-4 overflow-y-auto flex-1 pr-2 pb-8">
                   {filteredSales.map(sale => (
                     <div key={sale.id} className="glass-panel rounded-none neo-3d border-l-4 border-indigo-500 overflow-hidden group hover:-translate-y-0.5 transition-all duration-300">
                       <div className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -2388,9 +2579,9 @@ export default function App() {
 
                         <div className="flex items-center justify-between sm:justify-end gap-6 shrink-0">
                           <div className="text-right">
-                            <p className="text-lg font-black text-slate-900 dark:text-white tracking-tighter">{sale.totalAmount.toLocaleString()} MMK</p>
+                            <p className="text-xl font-black text-indigo-600 dark:text-indigo-400 tracking-tighter">{sale.totalAmount.toLocaleString()} MMK</p>
                             {currentUser?.role === 'admin' && (
-                              <p className="text-[10px] text-emerald-600 dark:text-emerald-400 font-black uppercase tracking-widest">{t.profit}: +{sale.profit.toLocaleString()}</p>
+                              <p className="text-[10px] text-emerald-600 dark:text-emerald-400 font-black uppercase tracking-[0.1em]">{t.profit}: +{sale.profit.toLocaleString()}</p>
                             )}
                           </div>
                           <div className="flex items-center gap-2">
@@ -2432,9 +2623,9 @@ export default function App() {
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 exit={{ opacity: 0 }}
-                className="space-y-6 h-full overflow-y-auto p-4 lg:p-8"
+                className="flex flex-col h-full p-4 lg:p-6 overflow-hidden pb-20"
               >
-                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 shrink-0 mb-6">
                   <h3 className="text-xl font-black text-slate-900 dark:text-white uppercase tracking-widest">{t.expenses}</h3>
                   <div className="flex flex-wrap items-center gap-3">
                     <div className="glass-panel px-6 py-3 rounded-none neo-3d border-t border-rose-500/20 flex items-center gap-3">
@@ -2458,7 +2649,7 @@ export default function App() {
                   </div>
                 </div>
 
-                <div className="grid grid-cols-1 gap-4">
+                <div className="grid grid-cols-1 gap-4 overflow-y-auto flex-1 pr-2 pb-8">
                   {filteredExpenses.map((expense) => (
                     <div 
                       key={expense.id}
@@ -2519,9 +2710,9 @@ export default function App() {
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 exit={{ opacity: 0 }}
-                className="space-y-6 h-full overflow-y-auto p-4 lg:p-8"
+                className="flex flex-col h-full p-4 lg:p-6 overflow-hidden pb-20"
               >
-                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 shrink-0 mb-6">
                   <h3 className="text-xl font-black text-slate-900 dark:text-white uppercase tracking-widest">{t.customers}</h3>
                   <button 
                     onClick={() => setIsAddCustomerOpen(true)}
@@ -2532,7 +2723,7 @@ export default function App() {
                   </button>
                 </div>
 
-                <div className="grid grid-cols-1 gap-4">
+                <div className="grid grid-cols-1 gap-4 overflow-y-auto flex-1 pr-2 pb-8">
                   {customers.map((customer) => {
                     const customerSales = sales.filter(s => s.customerId === customer.id);
                     const totalSpent = customerSales.reduce((sum, s) => sum + s.totalAmount, 0);
@@ -3713,7 +3904,7 @@ export default function App() {
                       </div>
                     )}
                     {receiptSettings.showShopName && (
-                      <h2 className="text-xl font-bold text-slate-900 dark:text-white uppercase tracking-tighter mb-1 leading-none">{receiptSettings.shopName}</h2>
+                      <h2 className="text-lg font-bold text-slate-900 dark:text-white uppercase tracking-tighter mb-1 leading-none">{receiptSettings.shopName}</h2>
                     )}
                     <div className="flex flex-col items-center gap-1">
                       {receiptSettings.address && (
@@ -3822,7 +4013,7 @@ export default function App() {
                     <div className="flex justify-between items-end">
                       <span className="text-[11px] font-bold text-slate-900 dark:text-white uppercase tracking-[0.2em]">{t.total}</span>
                       <div className="text-right">
-                        <p className="text-2xl font-bold text-slate-900 dark:text-white tracking-tighter leading-none">
+                        <p className="text-xl font-bold text-slate-900 dark:text-white tracking-tighter leading-none">
                           {lastSale.totalAmount.toLocaleString()}
                         </p>
                         <p className="text-[10px] font-bold text-slate-600 dark:text-slate-400 uppercase tracking-widest mt-0.5">{t.kyatsOnly}</p>
@@ -4042,19 +4233,19 @@ function CartContent({
               initial={{ opacity: 0, x: 20 }}
               animate={{ opacity: 1, x: 0 }}
               exit={{ opacity: 0, x: -20 }}
-              className="bg-white dark:bg-slate-800 p-3 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-700 flex flex-col gap-3 group hover:border-indigo-500/30 transition-colors"
+              className="bg-white dark:bg-slate-800 p-2 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 flex flex-col gap-2 group hover:border-indigo-500/30 transition-colors"
             >
-              <div className="flex items-center gap-3">
-                <div className="w-12 h-12 bg-slate-100 dark:bg-slate-900 rounded-xl overflow-hidden shrink-0 border border-slate-100 dark:border-slate-700 relative">
+              <div className="flex items-center gap-2">
+                <div className="w-10 h-10 bg-slate-100 dark:bg-slate-900 rounded-lg overflow-hidden shrink-0 border border-slate-100 dark:border-slate-700 relative">
                   {product.image ? (
-                    <img src={product.image} alt={product.name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                    <img src={product.image} alt={product.name} className="w-full h-full object-contain" referrerPolicy="no-referrer" />
                   ) : (
-                    <div className="w-full h-full flex items-center justify-center text-slate-300 dark:text-slate-600"><ImageIcon size={20} /></div>
+                    <div className="w-full h-full flex items-center justify-center text-slate-300 dark:text-slate-600"><ImageIcon size={16} /></div>
                   )}
                 </div>
                 <div className="flex-1 min-w-0">
-                  <p className="font-black text-slate-900 dark:text-white truncate text-xs tracking-tight">{product.name}</p>
-                  <p className="text-[10px] font-bold text-indigo-600 dark:text-indigo-400 uppercase tracking-widest">
+                  <p className="font-black text-slate-900 dark:text-white truncate text-[11px] tracking-tight">{product.name}</p>
+                  <p className="text-[9px] font-bold text-indigo-600 dark:text-indigo-400 uppercase tracking-widest">
                     {(() => {
                       let itemTotal = product.price * qty;
                       if (discountValue) {
@@ -4067,24 +4258,24 @@ function CartContent({
                       return Math.max(0, itemTotal).toLocaleString();
                     })()} MMK
                     {discountValue > 0 && (
-                      <span className="text-slate-400 line-through ml-2">
+                      <span className="text-slate-400 line-through ml-1">
                         {(product.price * qty).toLocaleString()}
                       </span>
                     )}
                   </p>
                 </div>
-                <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-900 p-1 rounded-xl border border-slate-200 dark:border-slate-700">
+                <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-900 p-0.5 rounded-lg border border-slate-200 dark:border-slate-700">
                   <button 
                     onClick={() => onRemove(product.id)}
-                    className="w-7 h-7 flex items-center justify-center rounded-lg bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 transition-all text-slate-900 dark:text-white font-black shadow-sm text-xs"
+                    className="w-6 h-6 flex items-center justify-center rounded-md bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 transition-all text-slate-900 dark:text-white font-black shadow-sm text-[10px]"
                   >
                     -
                   </button>
-                  <span className="w-6 text-center font-black text-xs text-slate-900 dark:text-white">{qty}</span>
+                  <span className="w-5 text-center font-black text-[10px] text-slate-900 dark:text-white">{qty}</span>
                   <button 
                     onClick={() => onAdd(product.id)}
                     disabled={product.stock <= qty}
-                    className="w-7 h-7 flex items-center justify-center rounded-lg bg-slate-900 dark:bg-white text-white dark:text-slate-900 hover:bg-slate-800 dark:hover:bg-slate-100 disabled:opacity-50 transition-all font-black shadow-md text-xs"
+                    className="w-6 h-6 flex items-center justify-center rounded-md bg-slate-900 dark:bg-white text-white dark:text-slate-900 hover:bg-slate-800 dark:hover:bg-slate-100 disabled:opacity-50 transition-all font-black shadow-md text-[10px]"
                   >
                     +
                   </button>
@@ -4092,19 +4283,19 @@ function CartContent({
               </div>
               
               {/* Item Discount Controls */}
-              <div className="flex items-center gap-2 pt-2 border-t border-slate-100 dark:border-slate-700">
+              <div className="flex items-center gap-2 pt-1.5 border-t border-slate-100 dark:border-slate-700">
                 <div className="flex bg-slate-100 dark:bg-slate-900 rounded-lg p-0.5 border border-slate-200 dark:border-slate-700">
                   <button
                     onClick={() => updateCartItemDiscount(product.id, 'percentage', discountValue)}
-                    className={`px-2 py-1 text-[10px] font-bold rounded-md transition-colors ${discountType === 'percentage' ? 'bg-white dark:bg-slate-800 text-slate-900 dark:text-white shadow-sm' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}
+                    className={`px-1.5 py-0.5 text-[8px] font-bold rounded transition-colors ${discountType === 'percentage' ? 'bg-white dark:bg-slate-800 text-slate-900 dark:text-white shadow-sm' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}
                   >
                     %
                   </button>
                   <button
                     onClick={() => updateCartItemDiscount(product.id, 'fixed', discountValue)}
-                    className={`px-2 py-1 text-[10px] font-bold rounded-md transition-colors ${discountType === 'fixed' ? 'bg-white dark:bg-slate-800 text-slate-900 dark:text-white shadow-sm' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}
+                    className={`px-1.5 py-0.5 text-[8px] font-bold rounded transition-colors ${discountType === 'fixed' ? 'bg-white dark:bg-slate-800 text-slate-900 dark:text-white shadow-sm' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}
                   >
-                    MMK
+                    $
                   </button>
                 </div>
                 <input
@@ -4112,7 +4303,7 @@ function CartContent({
                   value={discountValue || ''}
                   onChange={(e) => updateCartItemDiscount(product.id, discountType, Number(e.target.value))}
                   placeholder="Discount"
-                  className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg px-2 py-1 text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500/50"
+                  className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg px-2 py-0.5 text-[10px] font-bold text-slate-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-indigo-500/50"
                   min="0"
                   max={discountType === 'percentage' ? "100" : undefined}
                 />
@@ -4130,67 +4321,73 @@ function CartContent({
         )}
       </div>
 
-      <div className="bg-white dark:bg-slate-900 border-t border-slate-200 dark:border-slate-800 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)] z-10 relative flex flex-col shrink-0 max-h-[75vh]">
-        <div className="p-4 pb-2 overflow-y-auto space-y-3 custom-scrollbar">
+      <div className="bg-white dark:bg-slate-900 border-t border-slate-200 dark:border-slate-800 shadow-[0_-8px_30px_rgba(0,0,0,0.08)] z-10 relative flex flex-col shrink-0 max-h-[75vh] rounded-t-3xl">
+        <div className="p-4 pb-1.5 overflow-y-auto space-y-3 custom-scrollbar">
           {customers && customers.length > 0 && setCheckoutCustomerId && (
-            <div>
-              <label className="block text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">{t.selectCustomer}</label>
-              <select 
-                value={checkoutCustomerId || ''}
-                onChange={(e) => {
-                  const id = e.target.value;
-                  setCheckoutCustomerId(id);
-                  if (id) {
-                    const customer = customers.find(c => c.id === id);
-                    if (customer) {
-                      setCheckoutCustomerName(customer.name);
-                      setCheckoutCustomerPhone(customer.phone);
+            <div className="space-y-1">
+              <label className="block text-[9px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-[0.15em] ml-1">{t.selectCustomer}</label>
+              <div className="relative group">
+                <Users className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-indigo-500 transition-colors" size={14} />
+                <select 
+                  value={checkoutCustomerId || ''}
+                  onChange={(e) => {
+                    const id = e.target.value;
+                    setCheckoutCustomerId(id);
+                    if (id) {
+                      const customer = customers.find(c => c.id === id);
+                      if (customer) {
+                        setCheckoutCustomerName(customer.name);
+                        setCheckoutCustomerPhone(customer.phone);
+                      }
+                    } else {
+                      setCheckoutCustomerName('');
+                      setCheckoutCustomerPhone('');
                     }
-                  } else {
-                    setCheckoutCustomerName('');
-                    setCheckoutCustomerPhone('');
-                  }
-                }}
-                className="w-full px-3 py-2 text-xs bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-indigo-500/50 outline-none text-slate-900 dark:text-white transition-all"
-              >
-                <option value="">{t.walkInCustomer}</option>
-                {customers.map(c => (
-                  <option key={c.id} value={c.id}>{c.name} ({c.phone})</option>
-                ))}
-              </select>
+                  }}
+                  className="w-full pl-9 pr-4 py-2 text-xs bg-slate-50 dark:bg-slate-800/50 border-2 border-slate-200/60 dark:border-slate-700/50 focus:border-indigo-500/30 rounded-xl focus:ring-4 focus:ring-indigo-500/10 outline-none text-slate-900 dark:text-white transition-all appearance-none font-bold"
+                >
+                  <option value="">{t.walkInCustomer}</option>
+                  {customers.map(c => (
+                    <option key={c.id} value={c.id}>{c.name} ({c.phone})</option>
+                  ))}
+                </select>
+                <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400">
+                  <ChevronDown size={14} />
+                </div>
+              </div>
             </div>
           )}
           <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">{t.customerName}</label>
+            <div className="space-y-1">
+              <label className="block text-[9px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-[0.15em] ml-1">{t.customerName}</label>
               <input 
                 type="text" 
                 value={checkoutCustomerName}
                 onChange={(e) => setCheckoutCustomerName(e.target.value)}
                 disabled={!!checkoutCustomerId}
-                className="w-full px-3 py-2 text-xs bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-indigo-500/50 outline-none text-slate-900 dark:text-white disabled:opacity-50 transition-all"
+                className="w-full px-3 py-2 text-xs bg-slate-50 dark:bg-slate-800/50 border-2 border-slate-200/60 dark:border-slate-700/50 focus:border-indigo-500/30 rounded-xl focus:ring-4 focus:ring-indigo-500/10 outline-none text-slate-900 dark:text-white disabled:opacity-50 transition-all font-bold"
                 placeholder="Name"
               />
             </div>
-            <div>
-              <label className="block text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">{t.customerPhone}</label>
+            <div className="space-y-1">
+              <label className="block text-[9px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-[0.15em] ml-1">{t.customerPhone}</label>
               <input 
                 type="text" 
                 value={checkoutCustomerPhone}
                 onChange={(e) => setCheckoutCustomerPhone(e.target.value)}
                 disabled={!!checkoutCustomerId}
-                className="w-full px-3 py-2 text-xs bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-indigo-500/50 outline-none text-slate-900 dark:text-white disabled:opacity-50 transition-all"
+                className="w-full px-3 py-2 text-xs bg-slate-50 dark:bg-slate-800/50 border-2 border-slate-200/60 dark:border-slate-700/50 focus:border-indigo-500/30 rounded-xl focus:ring-4 focus:ring-indigo-500/10 outline-none text-slate-900 dark:text-white disabled:opacity-50 transition-all font-bold"
                 placeholder="Phone"
               />
             </div>
           </div>
           <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">{t.paymentMethod}</label>
+            <div className="space-y-1">
+              <label className="block text-[9px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-[0.15em] ml-1">{t.paymentMethod}</label>
               <select 
                 value={checkoutPaymentMethod}
                 onChange={(e) => setCheckoutPaymentMethod(e.target.value)}
-                className="w-full px-3 py-2 text-xs bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-indigo-500/50 outline-none text-slate-900 dark:text-white transition-all"
+                className="w-full px-3 py-2 text-xs bg-slate-50 dark:bg-slate-800/50 border-2 border-slate-200/60 dark:border-slate-700/50 focus:border-indigo-500/30 rounded-xl focus:ring-4 focus:ring-indigo-500/10 outline-none text-slate-900 dark:text-white transition-all font-bold"
               >
                 <option value="Cash">{t.cash}</option>
                 <option value="KPay">{t.kpay}</option>
@@ -4199,21 +4396,21 @@ function CartContent({
                 <option value="Credit">Credit</option>
               </select>
             </div>
-            <div>
-              <label className="block text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">{t.discount}</label>
-              <div className="flex gap-1">
-                <div className="flex bg-slate-100 dark:bg-slate-900 rounded-lg p-0.5 border border-slate-200 dark:border-slate-700 shrink-0">
+            <div className="space-y-1">
+              <label className="block text-[9px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-[0.15em] ml-1">{t.discount}</label>
+              <div className="flex gap-2">
+                <div className="flex bg-slate-100 dark:bg-slate-800 rounded-lg p-0.5 border border-slate-200 dark:border-slate-700 shrink-0">
                   <button
                     onClick={() => setCheckoutDiscountType('percentage')}
-                    className={`px-1.5 py-1 text-[9px] font-bold rounded-md transition-colors ${checkoutDiscountType === 'percentage' ? 'bg-white dark:bg-slate-800 text-slate-900 dark:text-white shadow-sm' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}
+                    className={`px-1.5 py-0.5 text-[8px] font-black rounded transition-all ${checkoutDiscountType === 'percentage' ? 'bg-white dark:bg-slate-700 text-indigo-600 dark:text-indigo-400 shadow-sm' : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-300'}`}
                   >
                     %
                   </button>
                   <button
                     onClick={() => setCheckoutDiscountType('fixed')}
-                    className={`px-1.5 py-1 text-[9px] font-bold rounded-md transition-colors ${checkoutDiscountType === 'fixed' ? 'bg-white dark:bg-slate-800 text-slate-900 dark:text-white shadow-sm' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}
+                    className={`px-1.5 py-0.5 text-[8px] font-black rounded transition-all ${checkoutDiscountType === 'fixed' ? 'bg-white dark:bg-slate-700 text-indigo-600 dark:text-indigo-400 shadow-sm' : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-300'}`}
                   >
-                    MMK
+                    $
                   </button>
                 </div>
                 <input 
@@ -4222,33 +4419,33 @@ function CartContent({
                   max={checkoutDiscountType === 'percentage' ? "100" : undefined}
                   value={checkoutDiscount || ''}
                   onChange={(e) => setCheckoutDiscount(Number(e.target.value))}
-                  className="w-full px-2 py-1.5 text-xs bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg focus:ring-1 focus:ring-indigo-500 outline-none text-slate-900 dark:text-white"
+                  className="w-full px-2 py-1.5 text-xs bg-slate-50 dark:bg-slate-800/50 border-2 border-slate-200/60 dark:border-slate-700/50 focus:border-indigo-500/30 rounded-xl focus:ring-4 focus:ring-indigo-500/10 outline-none text-slate-900 dark:text-white font-bold"
                   placeholder="0"
                 />
               </div>
             </div>
           </div>
           <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">{t.deliveryFee}</label>
+            <div className="space-y-1">
+              <label className="block text-[9px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-[0.15em] ml-1">{t.deliveryFee}</label>
               <input 
                 type="number" 
                 min="0"
                 value={checkoutDeliveryFee || ''}
                 onChange={(e) => setCheckoutDeliveryFee(Number(e.target.value))}
-                className="w-full px-3 py-2 text-xs bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-indigo-500/50 outline-none text-slate-900 dark:text-white transition-all"
+                className="w-full px-3 py-2 text-xs bg-slate-50 dark:bg-slate-800/50 border-2 border-slate-200/60 dark:border-slate-700/50 focus:border-indigo-500/30 rounded-xl focus:ring-4 focus:ring-indigo-500/10 outline-none text-slate-900 dark:text-white transition-all font-bold"
                 placeholder="0"
               />
             </div>
             {checkoutPaymentMethod === 'Credit' && (
-              <div>
-                <label className="block text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">Paid Amount</label>
+              <div className="space-y-1">
+                <label className="block text-[9px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-[0.15em] ml-1">Paid Amount</label>
                 <input 
                   type="number" 
                   min="0"
                   value={checkoutPaidAmount || ''}
                   onChange={(e) => setCheckoutPaidAmount(Number(e.target.value))}
-                  className="w-full px-3 py-2 text-xs bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-indigo-500/50 outline-none text-slate-900 dark:text-white transition-all"
+                  className="w-full px-3 py-2 text-xs bg-slate-50 dark:bg-slate-800/50 border-2 border-slate-200/60 dark:border-slate-700/50 focus:border-indigo-500/30 rounded-xl focus:ring-4 focus:ring-indigo-500/10 outline-none text-slate-900 dark:text-white transition-all font-bold"
                   placeholder="0"
                 />
               </div>
@@ -4256,7 +4453,7 @@ function CartContent({
           </div>
         </div>
 
-        <div className="px-4 pb-4 pt-2 space-y-3 shrink-0">
+        <div className="px-4 pb-4 pt-3 space-y-3 shrink-0 bg-slate-50/50 dark:bg-slate-950/30">
           {checkoutError && (
             <motion.div 
               initial={{ opacity: 0, y: 10 }}
@@ -4268,25 +4465,25 @@ function CartContent({
             </motion.div>
           )}
           <div className="space-y-1.5 pt-2 border-t border-slate-100 dark:border-slate-800">
-            <div className="flex justify-between text-xs font-medium text-slate-500 dark:text-slate-400">
+            <div className="flex justify-between text-[11px] font-medium text-slate-500 dark:text-slate-400">
               <span>{t.subtotal}</span>
               <span>{cartTotal.toLocaleString()} MMK</span>
             </div>
             {checkoutDiscount > 0 && (
-              <div className="flex justify-between text-xs font-bold text-rose-500 dark:text-rose-400">
+              <div className="flex justify-between text-[11px] font-bold text-rose-500 dark:text-rose-400">
                 <span>{t.discount} {checkoutDiscountType === 'percentage' ? `(${checkoutDiscount}%)` : ''}</span>
                 <span>-{checkoutDiscountType === 'percentage' ? (cartTotal * (checkoutDiscount / 100)).toLocaleString() : checkoutDiscount.toLocaleString()} MMK</span>
               </div>
             )}
             {checkoutDeliveryFee > 0 && (
-              <div className="flex justify-between text-xs font-bold text-slate-600 dark:text-slate-400">
+              <div className="flex justify-between text-[11px] font-bold text-slate-600 dark:text-slate-400">
                 <span>{t.deliveryFee}</span>
                 <span>+{checkoutDeliveryFee.toLocaleString()} MMK</span>
               </div>
             )}
-            <div className="flex justify-between text-xl font-black text-slate-900 dark:text-white pt-2 border-t-2 border-slate-100 dark:border-slate-800">
-              <span>{t.total}</span>
-              <span className="text-indigo-600 dark:text-indigo-400">{(() => {
+            <div className="flex justify-between text-sm sm:text-base font-black text-slate-900 dark:text-white pt-2 border-t-2 border-slate-100 dark:border-slate-800 items-baseline">
+              <span className="truncate mr-2">{t.total}</span>
+              <span className="text-indigo-600 dark:text-indigo-400 shrink-0">{(() => {
                 let discountAmount = 0;
                 if (checkoutDiscountType === 'percentage') {
                   discountAmount = cartTotal * (checkoutDiscount / 100);
@@ -4333,14 +4530,14 @@ function CartContent({
             <button 
               onClick={onCheckout}
               disabled={cartItems.length === 0 || isCheckingOut}
-              className="flex-1 py-3 bg-slate-900 dark:bg-indigo-600 text-white rounded-xl font-black text-xs uppercase tracking-widest hover:bg-slate-800 dark:hover:bg-indigo-500 hover:shadow-lg active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center justify-center gap-2"
+              className="flex-1 py-3 bg-indigo-600 dark:bg-indigo-500 text-white rounded-xl font-black text-sm uppercase tracking-widest hover:bg-indigo-700 dark:hover:bg-indigo-400 shadow-xl shadow-indigo-500/20 active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center justify-center gap-2"
             >
               {isCheckingOut ? (
-                <Loader2 size={16} className="animate-spin" />
+                <Loader2 size={18} className="animate-spin" />
               ) : (
                 <>
                   {t.checkout}
-                  <ArrowRight size={16} />
+                  <ArrowRight size={18} />
                 </>
               )}
             </button>
@@ -4357,7 +4554,7 @@ function SidebarItem({ icon, label, active, onClick, badge }: { icon: React.Reac
     <button 
       onClick={onClick}
       className={cn(
-        "w-[calc(100%-16px)] mx-2 flex items-center justify-between px-4 py-3 rounded-xl transition-all duration-300 font-bold tracking-tight relative group overflow-hidden mb-1",
+        "w-[calc(100%-16px)] mx-2 flex items-center justify-between px-4 py-2 rounded-xl transition-all duration-300 font-bold tracking-tight relative group overflow-hidden mb-1",
         active 
           ? "bg-white/15 text-white shadow-[0_8px_20px_rgba(0,0,0,0.3),inset_0_1px_0_rgba(255,255,255,0.1)] border border-white/20 backdrop-blur-md translate-x-1" 
           : "text-slate-300 hover:text-white hover:bg-white/5 hover:translate-x-1"
@@ -4371,7 +4568,7 @@ function SidebarItem({ icon, label, active, onClick, badge }: { icon: React.Reac
           {icon}
         </span>
         <span className={cn(
-          "truncate text-sm transition-colors",
+          "truncate text-[13px] transition-colors",
           active ? "text-white" : "text-slate-300 group-hover:text-white"
         )}>{label}</span>
       </div>
@@ -4402,30 +4599,30 @@ function StatCard({ title, value, icon, color, unit = "MMK" }: { title: string, 
 
   return (
     <motion.div 
-      whileHover={{ y: -4, scale: 1.02 }}
+      whileHover={{ y: -2, scale: 1.01 }}
       className={cn(
-        "p-4 rounded-2xl border-b-4 transition-all duration-300 group relative overflow-hidden shadow-lg",
+        "p-3 rounded-xl border-b-2 transition-all duration-300 group relative overflow-hidden shadow-md",
         colors[color] || "bg-slate-500 border-slate-600"
       )}
     >
-      <div className="absolute -right-6 -top-6 w-32 h-32 bg-white/10 rounded-full blur-3xl group-hover:scale-150 transition-transform duration-700" />
+      <div className="absolute -right-6 -top-6 w-24 h-24 bg-white/10 rounded-full blur-2xl group-hover:scale-150 transition-transform duration-700" />
       
-      <div className="flex items-start justify-between mb-2 relative z-10">
+      <div className="flex items-center justify-between mb-1 relative z-10">
         <div className={cn(
-          "p-2 rounded-xl bg-white/20 backdrop-blur-md border border-white/30 text-white shadow-inner",
+          "p-1.5 rounded-lg bg-white/20 backdrop-blur-md border border-white/30 text-white shadow-inner",
         )}>
           {icon}
         </div>
         <div className="text-right">
-          <span className="text-[9px] font-black text-white/70 uppercase tracking-[0.2em]">{title}</span>
+          <span className="text-[8px] font-black text-white/70 uppercase tracking-[0.15em]">{title}</span>
         </div>
       </div>
       
       <div className="relative z-10">
-        <p className="text-xl sm:text-2xl font-black text-white tracking-tighter leading-none mb-1">
+        <p className="text-lg sm:text-xl font-black text-white tracking-tighter leading-none mb-0.5">
           {value.toLocaleString()}
         </p>
-        <p className="text-[10px] font-bold text-white/60 uppercase tracking-widest">{unit}</p>
+        <p className="text-[8px] font-black text-white/50 uppercase tracking-widest">{unit}</p>
       </div>
     </motion.div>
   );
@@ -4500,7 +4697,7 @@ function AddProductForm({
     const file = e.target.files?.[0];
     if (file) {
       try {
-        const compressed = await compressImage(file, 800, 800, 0.7);
+        const compressed = await compressImage(file, 400, 400, 0.6);
         setFormData(prev => ({ ...prev, image: compressed }));
       } catch (error) {
         console.error("Error compressing image:", error);
@@ -4513,7 +4710,7 @@ function AddProductForm({
       <div className="space-y-4">
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <div className="md:col-span-2">
-            <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">{t.productName}</label>
+            <label className="block text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-[0.2em] mb-1.5 ml-1">{t.productName}</label>
             <input 
               required
               type="text" 
@@ -4524,7 +4721,7 @@ function AddProductForm({
             />
           </div>
           <div>
-            <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">{t.barcode || 'Barcode'}</label>
+            <label className="block text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-[0.2em] mb-1.5 ml-1">{t.barcode || 'Barcode'}</label>
             <input 
               type="text" 
               className="w-full px-4 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors text-slate-900 dark:text-white"
@@ -4537,7 +4734,7 @@ function AddProductForm({
 
         <div className="grid grid-cols-2 gap-4">
           <div>
-            <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">{t.cost}</label>
+            <label className="block text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-[0.2em] mb-1.5 ml-1">{t.cost}</label>
             <input 
               required
               type="number" 
@@ -4548,7 +4745,7 @@ function AddProductForm({
             />
           </div>
           <div>
-            <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">{t.price}</label>
+            <label className="block text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-[0.2em] mb-1.5 ml-1">{t.price}</label>
             <input 
               required
               type="number" 
@@ -4562,7 +4759,7 @@ function AddProductForm({
 
         <div className="grid grid-cols-2 gap-4">
           <div>
-            <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">{t.stock}</label>
+            <label className="block text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-[0.2em] mb-1.5 ml-1">{t.stock}</label>
             <input 
               required
               type="number" 
@@ -4573,7 +4770,7 @@ function AddProductForm({
             />
           </div>
           <div>
-            <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">{t.category}</label>
+            <label className="block text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-[0.2em] mb-1.5 ml-1">{t.category}</label>
             {isAddingCategory ? (
               <div className="flex gap-2">
                 <input 
@@ -4666,7 +4863,7 @@ function AddProductForm({
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div>
-            <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">{t.branch}</label>
+            <label className="block text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-[0.2em] mb-1.5 ml-1">{t.branch}</label>
             <select 
               className="w-full px-4 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors text-slate-900 dark:text-white font-medium"
               value={formData.branchId}
@@ -4684,7 +4881,7 @@ function AddProductForm({
 
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           <div>
-            <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">RAM</label>
+            <label className="block text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-[0.2em] mb-1.5 ml-1">RAM</label>
             <input 
               type="text" 
               className="w-full px-4 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors text-slate-900 dark:text-white"
@@ -4694,7 +4891,7 @@ function AddProductForm({
             />
           </div>
           <div>
-            <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Storage</label>
+            <label className="block text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-[0.2em] mb-1.5 ml-1">Storage</label>
             <input 
               type="text" 
               className="w-full px-4 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors text-slate-900 dark:text-white"
@@ -4704,7 +4901,7 @@ function AddProductForm({
             />
           </div>
           <div>
-            <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Color</label>
+            <label className="block text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-[0.2em] mb-1.5 ml-1">Color</label>
             <input 
               type="text" 
               className="w-full px-4 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors text-slate-900 dark:text-white"
@@ -4771,7 +4968,7 @@ function AddProductForm({
               )}
             >
               {formData.image ? (
-                <img src={formData.image} alt="Preview" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                <img src={formData.image} alt="Preview" className="w-full h-full object-contain" referrerPolicy="no-referrer" />
               ) : (
                 <>
                   <div className="p-2 bg-white dark:bg-slate-800 rounded-xl shadow-sm border-b-[3px] border-r-[3px] border-black/10 mb-2 group-hover:rotate-6 transition-transform duration-300">

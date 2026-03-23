@@ -1,9 +1,10 @@
 {
-  apiKey: "AIzaSyC2SH9peJvn_-KEdqUUipB4xhjp39n1LjM",
-  authDomain: "zinkopos.firebaseapp.com",
-  projectId: "zinkopos",
-  storageBucket: "zinkopos.firebasestorage.app",
-  messagingSenderId: "447470355037",
-  appId: "1:447470355037:web:042d9e3f698c095d4383b4",
-  measurementId: "G-QLKLXDD9D8"
-};
+  "projectId": "zinkopos",
+  "appId": "1:447470355037:web:042d9e3f698c095d4383b4",
+  "apiKey": "AIzaSyC2SH9peJvn_-KEdqUUipB4xhjp39n1LjM",
+  "authDomain": "zinkopos.firebaseapp.com",
+  "firestoreDatabaseId": "(default)",
+  "storageBucket": "zinkopos.firebasestorage.app",
+  "messagingSenderId": "447470355037",
+  "measurementId": "G-QLKLXDD9D8"
+}

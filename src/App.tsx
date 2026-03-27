@@ -1754,7 +1754,7 @@ export default function App() {
       )}>
         <div className="p-6 flex items-center justify-between">
           <h1 className="text-xl font-bold text-white flex items-center gap-2">
-            <div className="w-8 h-8 rounded-lg flex items-center justify-center overflow-hidden shadow-lg border border-white/20">
+            <div className="w-8 h-8 rounded-full flex items-center justify-center overflow-hidden shadow-lg border border-white/20">
               <img src="/favicon.svg" alt="Z SHOP Logo" className="w-full h-full object-cover" />
             </div>
             Z SHOP POS

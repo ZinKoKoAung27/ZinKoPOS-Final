@@ -43,7 +43,8 @@ import {
   List,
   Pause,
   Code,
-  ChevronDown
+  ChevronDown,
+  ScanBarcode
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { GoogleGenAI } from "@google/genai";
@@ -63,6 +64,7 @@ import {
 import { db, auth } from './firebase';
 import { useFirebaseSync } from './firebase-hooks';
 import * as htmlToImage from 'html-to-image';
+import { Html5QrcodeScanner } from 'html5-qrcode';
 
 // Utility for tailwind classes
 function cn(...inputs: ClassValue[]) {
@@ -794,6 +796,7 @@ export default function App() {
   const [newUsername, setNewUsername] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [settingsSuccess, setSettingsSuccess] = useState(false);
+  const [newCategoryInput, setNewCategoryInput] = useState('');
 
   const [activeTab, setActiveTab] = useState<'dashboard' | 'products' | 'pos' | 'history' | 'settings' | 'expenses' | 'customers'>('pos');
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
@@ -987,7 +990,7 @@ export default function App() {
     const totalExpenses = branchExpenses.reduce((sum, e) => sum + e.amount, 0);
     const netProfit = totalProfit - totalExpenses;
     
-    return { totalSales, totalCost, totalProfit, inventoryValue, totalExpenses, netProfit };
+    return { totalSales, totalCost, totalProfit, inventoryValue, totalExpenses, netProfit, totalOrders: branchSales.length };
   }, [sales, products, filteredExpenses, selectedBranchId]);
 
   const cartItems = useMemo(() => {
@@ -1052,8 +1055,27 @@ export default function App() {
     const totalSales = filteredSales.reduce((sum, s) => sum + s.totalAmount, 0);
     const totalCost = filteredSales.reduce((sum, s) => sum + s.totalCost, 0);
     const totalProfit = totalSales - totalCost;
-    return { totalSales, totalProfit };
-  }, [filteredSales]);
+
+    const filteredExpenses = expenses.filter(expense => {
+      if (selectedBranchId !== 'all' && expense.branchId !== selectedBranchId) return false;
+      
+      let matchesDate = true;
+      if (selectedDate) {
+        const date = new Date(expense.timestamp);
+        const year = date.getFullYear();
+        const month = String(date.getMonth() + 1).padStart(2, '0');
+        const day = String(date.getDate()).padStart(2, '0');
+        const dateStr = `${year}-${month}-${day}`;
+        matchesDate = dateStr === selectedDate;
+      }
+      return matchesDate;
+    });
+
+    const totalExpenses = filteredExpenses.reduce((sum, e) => sum + e.amount, 0);
+    const netProfit = totalProfit - totalExpenses;
+
+    return { totalSales, totalProfit, totalExpenses, netProfit };
+  }, [filteredSales, expenses, selectedDate, selectedBranchId]);
 
   const availableDates = useMemo(() => {
     const dates = new Set<string>();
@@ -1732,8 +1754,8 @@ export default function App() {
       )}>
         <div className="p-6 flex items-center justify-between">
           <h1 className="text-xl font-bold text-white flex items-center gap-2">
-            <div className="w-8 h-8 bg-white/20 backdrop-blur-md rounded-lg flex items-center justify-center text-white border border-white/30 shadow-lg">
-              <ShoppingCart size={18} />
+            <div className="w-8 h-8 rounded-lg flex items-center justify-center overflow-hidden shadow-lg border border-white/20">
+              <img src="/favicon.svg" alt="Z SHOP Logo" className="w-full h-full object-cover" />
             </div>
             Z SHOP POS
           </h1>
@@ -1766,7 +1788,6 @@ export default function App() {
               label={t.dashboard} 
               active={activeTab === 'dashboard'} 
               onClick={() => { setActiveTab('dashboard'); setIsSidebarOpen(false); }} 
-              badge={products.filter(p => p.stock < 10).length}
             />
           )}
           <SidebarItem 
@@ -1781,7 +1802,7 @@ export default function App() {
               label={t.products} 
               active={activeTab === 'products'} 
               onClick={() => { setActiveTab('products'); setIsSidebarOpen(false); }} 
-              badge={products.filter(p => p.stock < 10).length}
+              badge={products.filter(p => p.stock < 10 && (selectedBranchId === 'all' || p.branchId === selectedBranchId)).length}
             />
           )}
           <SidebarItem 
@@ -1970,59 +1991,61 @@ export default function App() {
                 </div>
                 <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 lg:gap-5">
                   <StatCard title={t.inventoryValue} value={stats.inventoryValue} icon={<Package size={18} />} color="amber" unit="MMK" />
-                  <StatCard title={t.totalOrders} value={sales.length} icon={<ShoppingBag size={18} />} color="violet" unit={t.items} />
+                  <StatCard title={t.totalOrders} value={stats.totalOrders} icon={<ShoppingBag size={18} />} color="violet" unit={t.items} />
                 </div>
 
-                <div className="grid grid-cols-1 gap-6 lg:gap-8">
-                  <div className="glass-panel p-8 rounded-none neo-3d border-t-4 border-rose-500 shadow-[0_30px_60px_rgba(244,63,94,0.15)] bg-gradient-to-br from-rose-500/5 to-transparent">
-                    <div className="flex items-center justify-between mb-8">
-                      <h3 className="text-xl font-black text-slate-900 dark:text-white uppercase tracking-[0.2em] flex items-center gap-3">
-                        <div className="p-2 bg-rose-500 rounded-none text-white shadow-lg">
-                          <AlertCircle size={20} />
+                <div className="grid grid-cols-1 gap-6 lg:gap-8 mt-4">
+                  <div>
+                    <div className="flex items-center justify-between mb-3">
+                      <div className="flex items-center gap-3">
+                        <div className="w-8 h-8 bg-[#ff2a5f] flex items-center justify-center text-white shrink-0">
+                          <AlertCircle size={18} />
                         </div>
-                        {t.lowStock}
-                      </h3>
-                      <span className="px-3 py-1 bg-rose-500 text-white text-[10px] font-black rounded-none uppercase tracking-widest">
-                        {products.filter(p => p.stock < 10).length} {t.items}
+                        <h3 className="text-base font-bold text-slate-900 dark:text-white uppercase tracking-[0.2em]">
+                          {t.lowStock}
+                        </h3>
+                      </div>
+                      <span className="px-2.5 py-1 bg-[#ff2a5f] text-white text-[10px] font-bold uppercase tracking-wider">
+                        {products.filter(p => p.stock < 10 && (selectedBranchId === 'all' || p.branchId === selectedBranchId)).length} {t.items}
                       </span>
                     </div>
-                    <div className="space-y-5">
-                      {products.filter(p => p.stock < 10).map(product => (
-                        <div key={product.id} className="flex items-center justify-between p-5 bg-white/80 dark:bg-slate-800/80 rounded-none neo-3d hover:neo-3d-pressed transition-all duration-300 border border-white/20">
+                    <div className="space-y-2">
+                      {products.filter(p => p.stock < 10 && (selectedBranchId === 'all' || p.branchId === selectedBranchId)).map(product => (
+                        <div key={product.id} className="flex items-center justify-between py-2 px-4 bg-white dark:bg-[#1e2532] border border-slate-200 dark:border-white/5 shadow-sm dark:shadow-none">
                           <div className="flex items-center gap-4 min-w-0">
-                            <div className="w-14 h-14 bg-slate-100 dark:bg-slate-900 rounded-none overflow-hidden shrink-0 shadow-inner neo-3d">
+                            <div className="w-10 h-10 bg-slate-100 dark:bg-white shrink-0 flex items-center justify-center p-0.5">
                               {product.image ? (
-                                <img src={product.image} alt={product.name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                                <img src={product.image} alt={product.name} className="w-full h-full object-contain mix-blend-multiply dark:mix-blend-normal" referrerPolicy="no-referrer" />
                               ) : (
-                                <div className="w-full h-full flex items-center justify-center text-slate-400 dark:text-slate-700"><ImageIcon size={24} /></div>
+                                <div className="w-full h-full flex items-center justify-center text-slate-400"><ImageIcon size={18} /></div>
                               )}
                             </div>
-                            <div className="min-w-0">
-                              <p className="font-black text-slate-900 dark:text-white truncate text-base">{product.name}</p>
-                              <div className="flex flex-wrap gap-1.5 mt-1.5">
-                                <p className="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest truncate">{product.category}</p>
-                                {product.ram && <span className="text-[10px] font-black text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-900/30 px-2 rounded border border-indigo-100 dark:border-indigo-800/50">{product.ram}</span>}
-                                {product.storage && <span className="text-[10px] font-black text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/30 px-2 rounded border border-amber-100 dark:border-amber-800/50">{product.storage}</span>}
-                                {product.color && <span className="text-[10px] font-black text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-900/30 px-2 rounded border border-rose-100 dark:border-rose-800/50">{product.color}</span>}
+                            <div className="min-w-0 flex flex-col justify-center">
+                              <p className="font-bold text-slate-900 dark:text-white text-sm truncate leading-tight mb-0.5">{product.name}</p>
+                              <div className="flex items-center flex-wrap gap-1.5">
+                                <p className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider truncate leading-none">{product.category}</p>
+                                {product.ram && <span className="text-[9px] font-bold text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-500/10 px-1.5 py-0.5 rounded border border-indigo-100 dark:border-indigo-500/20 leading-none">{product.ram}</span>}
+                                {product.storage && <span className="text-[9px] font-bold text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-500/10 px-1.5 py-0.5 rounded border border-amber-100 dark:border-amber-500/20 leading-none">{product.storage}</span>}
+                                {product.color && <span className="text-[9px] font-bold text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-500/10 px-1.5 py-0.5 rounded border border-rose-100 dark:border-rose-500/20 leading-none">{product.color}</span>}
                               </div>
                             </div>
                           </div>
                           <div className="text-right shrink-0 ml-4">
                             <div className={cn(
-                              "px-4 py-2 rounded-none font-black text-sm neo-3d-pressed",
-                              product.stock === 0 ? "bg-red-500/10 text-red-600" : "bg-rose-500/10 text-rose-600"
+                              "px-3 py-1 font-bold text-xs",
+                              product.stock === 0 ? "bg-red-50 dark:bg-red-500/10 text-red-600 dark:text-red-500" : "bg-rose-50 dark:bg-rose-500/10 text-rose-600 dark:text-rose-500"
                             )}>
                               {product.stock} {t.left}
                             </div>
                           </div>
                         </div>
                       ))}
-                      {products.filter(p => p.stock < 10).length === 0 && (
-                        <div className="text-center py-12">
-                          <div className="w-16 h-16 bg-emerald-100 dark:bg-emerald-900/30 rounded-full flex items-center justify-center mx-auto mb-4 neo-3d">
-                            <CheckCircle2 className="text-emerald-500" size={32} />
+                      {products.filter(p => p.stock < 10 && (selectedBranchId === 'all' || p.branchId === selectedBranchId)).length === 0 && (
+                        <div className="text-center py-6 bg-white dark:bg-[#1e2532] border border-slate-200 dark:border-white/5 shadow-sm dark:shadow-none">
+                          <div className="w-10 h-10 bg-emerald-50 dark:bg-emerald-500/10 rounded-full flex items-center justify-center mx-auto mb-2">
+                            <CheckCircle2 className="text-emerald-600 dark:text-emerald-500" size={20} />
                           </div>
-                          <p className="text-emerald-600 dark:text-emerald-400 font-bold italic">{t.allItemsInStock}</p>
+                          <p className="text-emerald-600 dark:text-emerald-400 text-xs font-bold italic">{t.allItemsInStock}</p>
                         </div>
                       )}
                     </div>
@@ -2384,28 +2407,38 @@ export default function App() {
                 <div className="flex flex-col gap-6 shrink-0 mb-6">
                   <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
                     <h3 className="text-xl font-black text-slate-900 dark:text-white uppercase tracking-widest">{t.salesHistory}</h3>
-                    <div className="flex flex-wrap items-center gap-3">
-                      <div className="glass-panel px-6 py-3 rounded-none neo-3d border-t border-indigo-500/20 flex items-center gap-3">
-                        <span className="text-[10px] text-slate-400 dark:text-slate-500 uppercase font-black tracking-widest">{t.totalSales}:</span>
-                        <span className="font-black text-slate-700 dark:text-slate-300 text-sm">{historyStats.totalSales.toLocaleString()} MMK</span>
+                    <div className="grid grid-cols-2 sm:flex sm:flex-wrap items-center gap-2 sm:gap-3 w-full sm:w-auto">
+                      <div className="glass-panel px-3 py-2 sm:px-6 sm:py-3 rounded-xl sm:rounded-none neo-3d border-t border-indigo-500/20 flex flex-col sm:flex-row items-start sm:items-center gap-1 sm:gap-3">
+                        <span className="text-[9px] sm:text-[10px] text-slate-400 dark:text-slate-500 uppercase font-black tracking-widest">{t.totalSales}</span>
+                        <span className="font-black text-slate-700 dark:text-slate-300 text-xs sm:text-sm">{historyStats.totalSales.toLocaleString()} MMK</span>
                       </div>
                       {currentUser?.role === 'admin' && (
-                        <div className="glass-panel px-6 py-3 rounded-none neo-3d border-t border-emerald-500/20 flex items-center gap-3">
-                          <span className="text-[10px] text-slate-400 dark:text-slate-500 uppercase font-black tracking-widest">{t.totalProfit}:</span>
-                          <span className="font-black text-emerald-600 dark:text-emerald-400 text-sm">{historyStats.totalProfit.toLocaleString()} MMK</span>
-                        </div>
+                        <>
+                          <div className="glass-panel px-3 py-2 sm:px-6 sm:py-3 rounded-xl sm:rounded-none neo-3d border-t border-emerald-500/20 flex flex-col sm:flex-row items-start sm:items-center gap-1 sm:gap-3">
+                            <span className="text-[9px] sm:text-[10px] text-slate-400 dark:text-slate-500 uppercase font-black tracking-widest">{t.totalProfit}</span>
+                            <span className="font-black text-emerald-600 dark:text-emerald-400 text-xs sm:text-sm">{historyStats.totalProfit.toLocaleString()} MMK</span>
+                          </div>
+                          <div className="glass-panel px-3 py-2 sm:px-6 sm:py-3 rounded-xl sm:rounded-none neo-3d border-t border-rose-500/20 flex flex-col sm:flex-row items-start sm:items-center gap-1 sm:gap-3">
+                            <span className="text-[9px] sm:text-[10px] text-slate-400 dark:text-slate-500 uppercase font-black tracking-widest">{t.totalExpenses}</span>
+                            <span className="font-black text-rose-600 dark:text-rose-400 text-xs sm:text-sm">{historyStats.totalExpenses.toLocaleString()} MMK</span>
+                          </div>
+                          <div className="glass-panel px-3 py-2 sm:px-6 sm:py-3 rounded-xl sm:rounded-none neo-3d border-t border-indigo-500/20 flex flex-col sm:flex-row items-start sm:items-center gap-1 sm:gap-3">
+                            <span className="text-[9px] sm:text-[10px] text-slate-400 dark:text-slate-500 uppercase font-black tracking-widest">{t.netProfit}</span>
+                            <span className="font-black text-indigo-600 dark:text-indigo-400 text-xs sm:text-sm">{historyStats.netProfit.toLocaleString()} MMK</span>
+                          </div>
+                        </>
                       )}
                       <button 
                         onClick={() => exportToCSV(filteredSales, t)}
-                        className="glass-panel px-6 py-3 rounded-none neo-3d border-t border-indigo-500/20 flex items-center gap-3 hover:bg-indigo-500/10 transition-colors"
+                        className="glass-panel col-span-2 sm:col-span-1 px-3 py-2 sm:px-6 sm:py-3 rounded-xl sm:rounded-none neo-3d border-t border-indigo-500/20 flex items-center justify-center gap-2 sm:gap-3 hover:bg-indigo-500/10 transition-colors"
                       >
-                        <Download size={18} className="text-indigo-500" />
+                        <Download size={16} className="text-indigo-500 sm:w-[18px] sm:h-[18px]" />
                         <span className="text-[10px] text-slate-700 dark:text-slate-300 uppercase font-black tracking-widest">{t.exportCSV}</span>
                       </button>
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-4">
                     <div 
                       className="relative cursor-pointer" 
                       onClick={() => {
@@ -2475,21 +2508,21 @@ export default function App() {
                   </div>
                 </div>
 
-                <div className="space-y-4 overflow-y-auto flex-1 pr-2 pb-8">
+                <div className="space-y-4 overflow-y-auto flex-1 pr-1 sm:pr-2 pb-8">
                   {filteredSales.map(sale => (
                     <div key={sale.id} className="glass-panel rounded-none neo-3d border-l-4 border-indigo-500 overflow-hidden group hover:-translate-y-0.5 transition-all duration-300">
-                      <div className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                        <div className="flex items-center gap-4">
-                          <div className="w-12 h-12 bg-slate-100 dark:bg-slate-800 rounded-none flex items-center justify-center text-slate-700 dark:text-slate-300 neo-3d-pressed">
-                            <ShoppingBag size={20} />
+                      <div className="p-3 sm:p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4">
+                        <div className="flex items-start sm:items-center gap-3 sm:gap-4">
+                          <div className="w-10 h-10 sm:w-12 sm:h-12 shrink-0 bg-slate-100 dark:bg-slate-800 rounded-none flex items-center justify-center text-slate-700 dark:text-slate-300 neo-3d-pressed">
+                            <ShoppingBag size={18} className="sm:w-5 sm:h-5" />
                           </div>
-                          <div className="min-w-0">
-                            <div className="flex flex-wrap items-center gap-x-2 gap-y-1 max-w-[150px] sm:max-w-md">
+                          <div className="min-w-0 flex-1">
+                            <div className="flex flex-wrap items-center gap-x-1 sm:gap-x-2 gap-y-1">
                               {sale.items.map((item, index) => (
-                                <span key={`${item.name}-${index}`} className="text-sm font-black text-slate-900 dark:text-white tracking-tight inline-flex items-center gap-1">
+                                <span key={`${item.name}-${index}`} className="text-xs sm:text-sm font-black text-slate-900 dark:text-white tracking-tight inline-flex items-center gap-1 break-words">
                                   {item.name}
                                   {item.quantity > 1 && (
-                                    <span className="text-[10px] font-bold bg-rose-500 text-white px-1.5 py-0.5 rounded-md shadow-sm">
+                                    <span className="text-[9px] sm:text-[10px] font-bold bg-rose-500 text-white px-1 sm:px-1.5 py-0.5 rounded-md shadow-sm">
                                       x{item.quantity}
                                     </span>
                                   )}
@@ -2497,15 +2530,15 @@ export default function App() {
                                 </span>
                               ))}
                             </div>
-                            <div className="flex items-center gap-2 mt-1">
-                              <p className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest">{new Date(sale.timestamp).toLocaleString()}</p>
+                            <div className="flex flex-wrap items-center gap-1 sm:gap-2 mt-1">
+                              <p className="text-[9px] sm:text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest whitespace-nowrap">{new Date(sale.timestamp).toLocaleString()}</p>
                               {sale.paymentMethod && (
-                                <span className="text-[9px] font-bold bg-indigo-100 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 px-1.5 py-0.5 rounded uppercase tracking-wider">
+                                <span className="text-[8px] sm:text-[9px] font-bold bg-indigo-100 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 px-1 sm:px-1.5 py-0.5 rounded uppercase tracking-wider whitespace-nowrap">
                                   {sale.paymentMethod}
                                 </span>
                               )}
                               {sale.customerName && (
-                                <span className="text-[9px] font-bold bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 px-1.5 py-0.5 rounded uppercase tracking-wider truncate max-w-[100px]">
+                                <span className="text-[8px] sm:text-[9px] font-bold bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 px-1 sm:px-1.5 py-0.5 rounded uppercase tracking-wider truncate max-w-[80px] sm:max-w-[100px]">
                                   {sale.customerName}
                                 </span>
                               )}
@@ -2519,30 +2552,30 @@ export default function App() {
                           </p>
                         </div>
 
-                        <div className="flex items-center justify-between sm:justify-end gap-6 shrink-0">
-                          <div className="text-right">
-                            <p className="text-xl font-black text-indigo-600 dark:text-indigo-400 tracking-tighter">{sale.totalAmount.toLocaleString()} MMK</p>
+                        <div className="flex items-center justify-between sm:justify-end gap-4 sm:gap-6 shrink-0 mt-2 sm:mt-0 pt-2 sm:pt-0 border-t sm:border-t-0 border-slate-100 dark:border-slate-800">
+                          <div className="text-left sm:text-right">
+                            <p className="text-lg sm:text-xl font-black text-indigo-600 dark:text-indigo-400 tracking-tighter">{sale.totalAmount.toLocaleString()} MMK</p>
                             {currentUser?.role === 'admin' && (
-                              <p className="text-[10px] text-emerald-600 dark:text-emerald-400 font-black uppercase tracking-[0.1em]">{t.profit}: +{sale.profit.toLocaleString()}</p>
+                              <p className="text-[9px] sm:text-[10px] text-emerald-600 dark:text-emerald-400 font-black uppercase tracking-[0.1em]">{t.profit}: +{sale.profit.toLocaleString()}</p>
                             )}
                           </div>
-                          <div className="flex items-center gap-2">
+                          <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
                             <button 
                               onClick={() => {
                                 setLastSale(sale);
                                 setIsReceiptOpen(true);
                               }}
-                              className="p-3 bg-indigo-50 dark:bg-indigo-500/10 text-indigo-500 rounded-none hover:bg-indigo-500 hover:text-white transition-all neo-3d"
+                              className="p-2 sm:p-3 bg-indigo-50 dark:bg-indigo-500/10 text-indigo-500 rounded-none hover:bg-indigo-500 hover:text-white transition-all neo-3d"
                               title="View Receipt"
                             >
-                              <Printer size={18} />
+                              <Printer size={16} className="sm:w-[18px] sm:h-[18px]" />
                             </button>
                             <button 
                               onClick={() => setSaleToDelete(sale.id)}
-                              className="p-3 bg-red-50 dark:bg-red-500/10 text-red-500 rounded-none hover:bg-red-500 hover:text-white transition-all neo-3d"
+                              className="p-2 sm:p-3 bg-red-50 dark:bg-red-500/10 text-red-500 rounded-none hover:bg-red-500 hover:text-white transition-all neo-3d"
                               title="Delete sale and restore stock"
                             >
-                              <Trash2 size={18} />
+                              <Trash2 size={16} className="sm:w-[18px] sm:h-[18px]" />
                             </button>
                           </div>
                         </div>
@@ -2806,7 +2839,85 @@ export default function App() {
                   </form>
                 </div>
 
+                {/* Manage Categories */}
+                <div className="glass-panel p-4 sm:p-8 rounded-2xl neo-3d border-t-2 border-slate-500/20 mt-8">
+                  <div className="flex items-center gap-4 mb-6">
+                    <div className="w-10 h-10 bg-slate-100 dark:bg-slate-800 rounded-xl flex items-center justify-center text-slate-700 dark:text-slate-300">
+                      <List size={20} />
+                    </div>
+                    <h3 className="text-xl font-bold text-slate-900 dark:text-white uppercase tracking-wider">{t.category || 'Categories'}</h3>
+                  </div>
+                  
+                  <div className="space-y-4">
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        value={newCategoryInput}
+                        onChange={(e) => setNewCategoryInput(e.target.value)}
+                        className="flex-1 px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors text-slate-900 dark:text-white font-medium"
+                        placeholder="New category name..."
+                        onKeyDown={async (e) => {
+                          if (e.key === 'Enter' && newCategoryInput.trim()) {
+                            e.preventDefault();
+                            const newCat = newCategoryInput.trim();
+                            if (!categories.includes(newCat)) {
+                              const newCategories = [...categories, newCat];
+                              try {
+                                await setDoc(doc(db, 'settings', 'general'), { categories: newCategories }, { merge: true });
+                                setNewCategoryInput('');
+                              } catch (error) {
+                                console.error("Error adding category:", error);
+                              }
+                            }
+                          }
+                        }}
+                      />
+                      <button
+                        onClick={async () => {
+                          if (newCategoryInput.trim()) {
+                            const newCat = newCategoryInput.trim();
+                            if (!categories.includes(newCat)) {
+                              const newCategories = [...categories, newCat];
+                              try {
+                                await setDoc(doc(db, 'settings', 'general'), { categories: newCategories }, { merge: true });
+                                setNewCategoryInput('');
+                              } catch (error) {
+                                console.error("Error adding category:", error);
+                              }
+                            }
+                          }
+                        }}
+                        className="px-6 py-3 bg-indigo-600 text-white rounded-xl font-bold hover:bg-indigo-700 transition-colors shadow-lg neo-3d flex items-center justify-center gap-2"
+                      >
+                        <Plus size={18} />
+                        Add
+                      </button>
+                    </div>
 
+                    <div className="flex flex-wrap gap-2 mt-4">
+                      {categories.map(category => (
+                        <div key={category} className="flex items-center gap-2 px-3 py-1.5 bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg">
+                          <span className="text-sm font-bold text-slate-700 dark:text-slate-300">{category}</span>
+                          <button
+                            onClick={async () => {
+                              if (window.confirm(`Delete category "${category}"?`)) {
+                                const newCategories = categories.filter(c => c !== category);
+                                try {
+                                  await setDoc(doc(db, 'settings', 'general'), { categories: newCategories }, { merge: true });
+                                } catch (error) {
+                                  console.error("Error deleting category:", error);
+                                }
+                              }
+                            }}
+                            className="text-slate-400 hover:text-red-500 transition-colors p-1"
+                          >
+                            <X size={14} />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
 
                 {/* Receipt Customization */}
                 <div className="glass-panel p-4 sm:p-8 rounded-2xl neo-3d border-t-2 border-slate-500/20 mt-8">
@@ -3827,35 +3938,35 @@ export default function App() {
                 </div>
 
                 <div className="flex-1 overflow-y-auto bg-white dark:bg-slate-900 relative">
-                  <div id="receipt-content" className="p-4 relative bg-white dark:bg-slate-900">
+                  <div id="receipt-content" className="p-4 relative bg-white">
                     {/* Decorative Paper Texture Overlay */}
-                    <div className="absolute inset-0 opacity-[0.03] pointer-events-none bg-[url('https://www.transparenttextures.com/patterns/paper-fibers.png')] dark:invert" />
+                    <div className="absolute inset-0 opacity-[0.03] pointer-events-none bg-[url('https://www.transparenttextures.com/patterns/paper-fibers.png')]" />
                   
                   <div className="text-center mb-4 relative z-10">
                     {receiptSettings.logo ? (
-                      <div className="mb-3">
+                      <div className="-mt-4 mb-1 flex justify-center overflow-hidden" style={{ maxHeight: '100px' }}>
                         <img 
                           src={receiptSettings.logo} 
                           alt="Shop Logo" 
-                          className="h-16 w-auto mx-auto object-contain"
+                          className="w-64 h-auto object-contain grayscale contrast-150 mix-blend-multiply print-logo scale-150"
                         />
                       </div>
                     ) : (
-                      <div className="w-12 h-12 bg-slate-900 dark:bg-white rounded-2xl flex items-center justify-center text-white dark:text-slate-900 mx-auto mb-3 shadow-2xl rotate-3">
+                      <div className="w-12 h-12 bg-slate-900 rounded-2xl flex items-center justify-center text-white mx-auto mb-3 shadow-2xl rotate-3">
                         <ShoppingBag size={24} />
                       </div>
                     )}
                     {receiptSettings.showShopName && (
-                      <h2 className="text-lg font-bold text-slate-900 dark:text-white uppercase tracking-tighter mb-1 leading-none">{receiptSettings.shopName}</h2>
+                      <h2 className="text-xl font-black text-slate-900 uppercase tracking-tighter mb-1 leading-none">{receiptSettings.shopName}</h2>
                     )}
                     <div className="flex flex-col items-center gap-1">
                       {receiptSettings.address && (
-                        <p className="text-[11px] font-bold text-slate-600 dark:text-slate-300 uppercase tracking-[0.2em] max-w-[200px] leading-relaxed">{receiptSettings.address}</p>
+                        <p className="text-[11px] font-bold text-slate-600 uppercase tracking-[0.2em] max-w-[200px] leading-relaxed">{receiptSettings.address}</p>
                       )}
                       {receiptSettings.phone && (
                         <>
-                          <div className="h-px w-8 bg-slate-200 dark:bg-slate-800 my-1" />
-                          <p className="text-xs font-bold text-slate-900 dark:text-white uppercase tracking-widest mt-0.5">
+                          <div className="h-px w-8 bg-slate-200 my-1" />
+                          <p className="text-xs font-bold text-slate-900 uppercase tracking-widest mt-0.5">
                             {t.phoneLabel} - <span className="text-sm tracking-widest">{receiptSettings.phone.replace(/^(Phone|Ph|ဖုန်း)[\s:-]*/i, '')}</span>
                           </p>
                         </>
@@ -3864,25 +3975,25 @@ export default function App() {
                   </div>
 
                   <div className="relative mb-4">
-                    <div className="absolute inset-x-0 top-1/2 h-px bg-slate-200 dark:bg-slate-800 -translate-y-1/2" />
+                    <div className="absolute inset-x-0 top-1/2 h-px bg-slate-200 -translate-y-1/2" />
                     <div className="relative flex justify-center">
-                      <span className="bg-white dark:bg-slate-900 px-3 text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-[0.3em]">{t.transactionDetails}</span>
+                      <span className="bg-white px-3 text-[10px] font-bold text-slate-500 uppercase tracking-[0.3em]">{t.transactionDetails}</span>
                     </div>
                   </div>
 
                   <div className="space-y-1.5 mb-4">
-                    <div className="flex justify-between text-[10px] font-bold text-slate-600 dark:text-slate-400 uppercase tracking-widest">
+                    <div className="flex justify-between text-[10px] font-bold text-slate-600 uppercase tracking-widest">
                       <span>{t.orderId}</span>
-                      <span className="text-slate-900 dark:text-white">#{lastSale.id}</span>
+                      <span className="text-slate-900">#{lastSale.id}</span>
                     </div>
-                    <div className="flex justify-between text-[10px] font-bold text-slate-600 dark:text-slate-400 uppercase tracking-widest">
+                    <div className="flex justify-between text-[10px] font-bold text-slate-600 uppercase tracking-widest">
                       <span>{t.date}</span>
-                      <span className="text-slate-900 dark:text-white">{new Date(lastSale.timestamp).toLocaleString()}</span>
+                      <span className="text-slate-900">{new Date(lastSale.timestamp).toLocaleString()}</span>
                     </div>
                     {lastSale.paymentMethod && (
-                      <div className="flex justify-between text-[10px] font-bold text-slate-600 dark:text-slate-400 uppercase tracking-widest">
+                      <div className="flex justify-between text-[10px] font-bold text-slate-600 uppercase tracking-widest">
                         <span>{t.paymentMethod}</span>
-                        <span className="text-slate-900 dark:text-white">
+                        <span className="text-slate-900">
                           {lastSale.paymentMethod === 'Cash' ? t.cash : 
                            lastSale.paymentMethod === 'KPay' ? t.kpay : 
                            lastSale.paymentMethod === 'WavePay' ? t.wavepay : 
@@ -3892,15 +4003,15 @@ export default function App() {
                       </div>
                     )}
                     {lastSale.customerName && (
-                      <div className="flex justify-between text-[10px] font-bold text-slate-600 dark:text-slate-400 uppercase tracking-widest">
+                      <div className="flex justify-between text-[10px] font-bold text-slate-600 uppercase tracking-widest">
                         <span>{t.customerName}</span>
-                        <span className="text-slate-900 dark:text-white">{lastSale.customerName}</span>
+                        <span className="text-slate-900">{lastSale.customerName}</span>
                       </div>
                     )}
                     {lastSale.customerPhone && (
-                      <div className="flex justify-between text-[10px] font-bold text-slate-600 dark:text-slate-400 uppercase tracking-widest">
+                      <div className="flex justify-between text-[10px] font-bold text-slate-600 uppercase tracking-widest">
                         <span>{t.customerPhone}</span>
-                        <span className="text-slate-900 dark:text-white">{lastSale.customerPhone}</span>
+                        <span className="text-slate-900">{lastSale.customerPhone}</span>
                       </div>
                     )}
                   </div>
@@ -3918,47 +4029,47 @@ export default function App() {
                       return (
                       <div key={`${item.name}-${idx}`} className="group">
                         <div className="flex justify-between items-start mb-1">
-                          <p className="text-sm font-bold text-slate-900 dark:text-white leading-tight uppercase tracking-tight">{item.name}</p>
-                          <p className="text-sm font-bold text-slate-900 dark:text-white">
+                          <p className="text-sm font-bold text-slate-900 leading-tight uppercase tracking-tight">{item.name}</p>
+                          <p className="text-sm font-bold text-slate-900">
                             {Math.max(0, itemTotal).toLocaleString()}
                           </p>
                         </div>
                         <div className="flex items-center gap-2">
-                          <span className="text-[11px] font-medium text-slate-500 dark:text-slate-400 uppercase tracking-widest">
+                          <span className="text-[11px] font-medium text-slate-500 uppercase tracking-widest">
                             {item.quantity} x {item.price.toLocaleString()} {t.currency}
                             {item.discountValue ? ` (-${item.discountType === 'percentage' ? `${item.discountValue}%` : `${item.discountValue} ${t.currency}`})` : ''}
                           </span>
-                          <div className="flex-1 border-t border-dotted border-slate-200 dark:border-slate-800" />
+                          <div className="flex-1 border-t border-dotted border-slate-200" />
                         </div>
                       </div>
                     )})}
                   </div>
 
                   <div className="space-y-2 mb-6">
-                    <div className="flex justify-between text-[11px] font-bold text-slate-600 dark:text-slate-400 uppercase tracking-widest">
+                    <div className="flex justify-between text-[11px] font-bold text-slate-600 uppercase tracking-widest">
                       <span>{t.subtotal}</span>
                       <span>{(lastSale.totalAmount + (lastSale.discount || 0) - (lastSale.deliveryFee || 0)).toLocaleString()} {t.currency}</span>
                     </div>
                     {lastSale.discount && lastSale.discount > 0 ? (
-                      <div className="flex justify-between text-[11px] font-bold text-slate-600 dark:text-slate-400 uppercase tracking-widest">
+                      <div className="flex justify-between text-[11px] font-bold text-slate-600 uppercase tracking-widest">
                         <span>{t.discount}</span>
                         <span>-{lastSale.discount.toLocaleString()} {t.currency}</span>
                       </div>
                     ) : null}
                     {lastSale.deliveryFee && lastSale.deliveryFee > 0 ? (
-                      <div className="flex justify-between text-[11px] font-bold text-slate-600 dark:text-slate-400 uppercase tracking-widest">
+                      <div className="flex justify-between text-[11px] font-bold text-slate-600 uppercase tracking-widest">
                         <span>{t.deliveryFee}</span>
                         <span>+{lastSale.deliveryFee.toLocaleString()} {t.currency}</span>
                       </div>
                     ) : null}
-                    <div className="h-px bg-slate-900 dark:bg-white" />
+                    <div className="h-px bg-slate-900" />
                     <div className="flex justify-between items-end">
-                      <span className="text-[11px] font-bold text-slate-900 dark:text-white uppercase tracking-[0.2em]">{t.total}</span>
+                      <span className="text-[11px] font-bold text-slate-900 uppercase tracking-[0.2em]">{t.total}</span>
                       <div className="text-right">
-                        <p className="text-xl font-bold text-slate-900 dark:text-white tracking-tighter leading-none">
+                        <p className="text-xl font-bold text-slate-900 tracking-tighter leading-none">
                           {lastSale.totalAmount.toLocaleString()}
                         </p>
-                        <p className="text-[10px] font-bold text-slate-600 dark:text-slate-400 uppercase tracking-widest mt-0.5">{t.kyatsOnly}</p>
+                        <p className="text-[10px] font-bold text-slate-600 uppercase tracking-widest mt-0.5">{t.kyatsOnly}</p>
                       </div>
                     </div>
                   </div>
@@ -3966,7 +4077,7 @@ export default function App() {
                   {receiptSettings.showThankYou && (
                     <div className="space-y-4 text-center relative z-10 mt-6">
                       <div className="space-y-1.5 pt-2">
-                        <p className="text-sm font-bold text-slate-900 dark:text-white uppercase tracking-widest">{t.thankYou}</p>
+                        <p className="text-sm font-bold text-slate-900 uppercase tracking-widest">{t.thankYou}</p>
                       </div>
                     </div>
                   )}
@@ -4024,6 +4135,10 @@ export default function App() {
                                     margin: 0 auto;
                                     padding: 20px;
                                     background: white;
+                                  }
+                                  .print-logo {
+                                    filter: grayscale(100%) contrast(150%) !important;
+                                    mix-blend-mode: multiply !important;
                                   }
                                 </style>
                               </head>
@@ -4570,6 +4685,60 @@ function StatCard({ title, value, icon, color, unit = "MMK" }: { title: string, 
   );
 }
 
+function BarcodeScannerModal({ 
+  onScan, 
+  onClose, 
+  t 
+}: { 
+  onScan: (barcode: string) => void, 
+  onClose: () => void, 
+  t: any 
+}) {
+  useEffect(() => {
+    const scanner = new Html5QrcodeScanner(
+      "reader",
+      { fps: 10, qrbox: { width: 250, height: 150 } },
+      false
+    );
+
+    scanner.render(
+      (decodedText) => {
+        scanner.clear();
+        onScan(decodedText);
+      },
+      (error) => {
+        // ignore errors as they happen constantly during scanning
+      }
+    );
+
+    return () => {
+      scanner.clear().catch(console.error);
+    };
+  }, [onScan]);
+
+  return (
+    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-sm">
+      <div className="bg-white dark:bg-slate-900 rounded-3xl w-full max-w-md overflow-hidden shadow-2xl border border-slate-200 dark:border-slate-800 flex flex-col">
+        <div className="p-4 sm:p-6 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between bg-slate-50/50 dark:bg-slate-800/50">
+          <h2 className="text-lg sm:text-xl font-black text-slate-900 dark:text-white uppercase tracking-widest">{t.barcode || 'Scan Barcode'}</h2>
+          <button 
+            onClick={onClose}
+            className="p-2 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-full transition-colors text-slate-500 dark:text-slate-400"
+          >
+            <X size={20} />
+          </button>
+        </div>
+        <div className="p-4 sm:p-6 flex-1 overflow-y-auto">
+          <div id="reader" className="w-full overflow-hidden rounded-xl border-2 border-dashed border-slate-300 dark:border-slate-700"></div>
+          <p className="text-center text-xs text-slate-500 dark:text-slate-400 mt-4">
+            Point your camera at a barcode to scan it automatically.
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function AddProductForm({ 
   onAdd, 
   t,
@@ -4607,6 +4776,7 @@ function AddProductForm({
   const [isAddingCategory, setIsAddingCategory] = useState(false);
   const [newCategory, setNewCategory] = useState('');
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [isScannerOpen, setIsScannerOpen] = useState(false);
 
   const handleAddCategory = () => {
     if (newCategory.trim()) {
@@ -4663,7 +4833,17 @@ function AddProductForm({
             />
           </div>
           <div>
-            <label className="block text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-[0.2em] mb-1.5 ml-1">{t.barcode || 'Barcode'}</label>
+            <div className="flex items-center justify-between mb-1.5 ml-1">
+              <label className="block text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-[0.2em]">{t.barcode || 'Barcode'}</label>
+              <button
+                type="button"
+                onClick={() => setIsScannerOpen(true)}
+                className="text-[10px] font-bold text-indigo-500 hover:text-indigo-600 dark:text-indigo-400 dark:hover:text-indigo-300 flex items-center gap-1 transition-colors"
+              >
+                <ScanBarcode size={12} />
+                Scan
+              </button>
+            </div>
             <input 
               type="text" 
               className="w-full px-4 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors text-slate-900 dark:text-white"
@@ -4673,6 +4853,17 @@ function AddProductForm({
             />
           </div>
         </div>
+
+        {isScannerOpen && (
+          <BarcodeScannerModal 
+            t={t}
+            onScan={(barcode) => {
+              setFormData(prev => ({ ...prev, barcode }));
+              setIsScannerOpen(false);
+            }}
+            onClose={() => setIsScannerOpen(false)}
+          />
+        )}
 
         <div className="grid grid-cols-2 gap-4">
           <div>

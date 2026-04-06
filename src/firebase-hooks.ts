@@ -61,7 +61,8 @@ export function useFirebaseSync(
   setAdminCredentials: any,
   setExpenses: any,
   setBranches: any,
-  setCustomers: any
+  setCustomers: any,
+  setExpenseCategories: any
 ) {
   useEffect(() => {
     const unsubProducts = onSnapshot(collection(db, 'products'), (snapshot) => {
@@ -81,6 +82,11 @@ export function useFirebaseSync(
       setExpenses(expensesData);
     }, (error) => handleFirestoreError(error, OperationType.GET, 'expenses'));
 
+    const unsubExpenseCategories = onSnapshot(collection(db, 'expenseCategories'), (snapshot) => {
+      const expenseCategoriesData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      setExpenseCategories(expenseCategoriesData);
+    }, (error) => handleFirestoreError(error, OperationType.GET, 'expenseCategories'));
+
     const unsubCustomers = onSnapshot(collection(db, 'customers'), (snapshot) => {
       const customersData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
       customersData.sort((a: any, b: any) => b.createdAt - a.createdAt);
@@ -90,14 +96,31 @@ export function useFirebaseSync(
     const unsubSettings = onSnapshot(doc(db, 'settings', 'general'), (docSnap) => {
       if (docSnap.exists()) {
         const data = docSnap.data();
-        if (data.categories) setCategories(data.categories);
+        let currentCategories = data.categories || [];
+        
+        // One-time migration to add new default categories
+        const migrated = localStorage.getItem('pos_categories_migrated_v4');
+        if (!migrated) {
+          const requiredCategories = ['Smartphones', 'Keypad Phones', 'Tablets', 'Accessories', 'Chargers & Cables', 'Audio', 'Power Banks', 'Cases & Covers', 'Screen Protectors', 'Repair Parts', 'SD cards', 'SIM card'];
+          const missingCategories = requiredCategories.filter(c => !currentCategories.includes(c));
+          
+          if (missingCategories.length > 0) {
+            currentCategories = [...currentCategories, ...missingCategories];
+            setDoc(doc(db, 'settings', 'general'), { categories: currentCategories }, { merge: true });
+          }
+          localStorage.setItem('pos_categories_migrated_v4', 'true');
+        }
+        
+        setCategories(currentCategories);
         if (data.adminCredentials) setAdminCredentials(data.adminCredentials);
       } else {
         // Initialize settings if they don't exist
+        const defaultCategories = ['Smartphones', 'Keypad Phones', 'Tablets', 'Accessories', 'Chargers & Cables', 'Audio', 'Power Banks', 'Cases & Covers', 'Screen Protectors', 'Repair Parts', 'SD cards', 'SIM card', 'General'];
         setDoc(doc(db, 'settings', 'general'), {
-          categories: ['General', 'Electronics', 'Food', 'Clothing', 'Home', 'Beauty'],
+          categories: defaultCategories,
           adminCredentials: { username: 'admin', password: 'admin123' }
         });
+        localStorage.setItem('pos_categories_migrated_v4', 'true');
       }
     }, (error) => handleFirestoreError(error, OperationType.GET, 'settings/general'));
 
@@ -115,10 +138,11 @@ export function useFirebaseSync(
       unsubProducts();
       unsubSales();
       unsubExpenses();
+      unsubExpenseCategories();
       unsubCustomers();
       unsubSettings();
       unsubBranches();
       unsubStaff();
     };
-  }, [setProducts, setSales, setCategories, setStaffAccounts, setAdminCredentials, setExpenses, setBranches, setCustomers]);
+  }, [setProducts, setSales, setCategories, setStaffAccounts, setAdminCredentials, setExpenses, setBranches, setCustomers, setExpenseCategories]);
 }

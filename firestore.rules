@@ -1,48 +1,7 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // ===============================================================
-    // Helper Functions
-    // ===============================================================
-    function isAuthenticated() {
-      return request.auth != null;
-    }
-
-    function isAdmin() {
-      return isAuthenticated() && 
-             request.auth.token.email == "zinkokoaung780@gmail.com" && 
-             request.auth.token.email_verified == true;
-    }
-
-    // ===============================================================
-    // Rules
-    // ===============================================================
-
-    match /products/{productId} {
-      allow read, write: if true;
-    }
-
-    match /sales/{saleId} {
-      allow read, write: if true;
-    }
-
-    match /expenses/{expenseId} {
-      allow read, write: if true;
-    }
-
-    match /customers/{customerId} {
-      allow read, write: if true;
-    }
-
-    match /branches/{branchId} {
-      allow read, write: if true;
-    }
-
-    match /staffAccounts/{staffId} {
-      allow read, write: if true;
-    }
-
-    match /settings/general {
+    match /{document=**} {
       allow read, write: if true;
     }
   }

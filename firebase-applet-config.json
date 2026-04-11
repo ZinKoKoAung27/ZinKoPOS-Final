@@ -1,10 +1,9 @@
-{
-  "projectId": "zinkopos",
-  "appId": "1:447470355037:web:042d9e3f698c095d4383b4",
-  "apiKey": "AIzaSyC2SH9peJvn_-KEdqUUipB4xhjp39n1LjM",
-  "authDomain": "zinkopos.firebaseapp.com",
-  "firestoreDatabaseId": "(default)",
-  "storageBucket": "zinkopos.firebasestorage.app",
-  "messagingSenderId": "447470355037",
-  "measurementId": "G-QLKLXDD9D8"
-}
+# GEMINI_API_KEY: Required for Gemini AI API calls.
+# AI Studio automatically injects this at runtime from user secrets.
+# Users configure this via the Secrets panel in the AI Studio UI.
+GEMINI_API_KEY="MY_GEMINI_API_KEY"
+
+# APP_URL: The URL where this applet is hosted.
+# AI Studio automatically injects this at runtime with the Cloud Run service URL.
+# Used for self-referential links, OAuth callbacks, and API endpoints.
+APP_URL="MY_APP_URL"

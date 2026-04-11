@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { 
   LayoutDashboard, 
   Package, 
@@ -44,6 +44,7 @@ import {
   Pause,
   Code,
   ChevronDown,
+  Filter,
   ScanBarcode,
   Calendar,
   ArrowDownCircle,
@@ -113,6 +114,7 @@ interface SaleItem {
   quantity: number;
   price: number;
   cost: number;
+  category: string;
   discountType?: 'percentage' | 'fixed';
   discountValue?: number;
 }
@@ -325,7 +327,7 @@ const TRANSLATIONS = {
     credit: 'Credit',
     paidAmount: 'Paid Amount',
     transactionDetails: 'Transaction Details',
-    kyatsOnly: 'Kyats Only',
+    kyatsOnly: 'Only',
     currency: 'MMK',
     phoneLabel: 'PHONE',
     save: 'Save',
@@ -379,17 +381,33 @@ const TRANSLATIONS = {
     used: 'Used',
     allConditions: 'All Conditions',
     selectCondition: 'Select Condition',
+    allBrands: 'All Brands',
     scan: 'Scan',
     brand: 'Brand',
     payDebt: 'Pay Debt',
     autoPrint: 'Auto-print after checkout',
     reports: 'Reports',
+    selectCurrency: 'Select Currency',
     startDate: 'Start Date',
     endDate: 'End Date',
     generateReport: 'Generate Report',
     salesReport: 'Sales Report',
+    expensesReport: 'Expenses Report',
+    profitLoss: 'Profit & Loss',
+    editExpense: 'Edit Expense',
+    updateExpense: 'Update Expense',
+    expenseSummary: 'Expense Summary',
+    categorySummary: 'Category Summary',
     noReportsFound: 'No reports found for the selected criteria',
-    exportToCSV: 'Export to CSV'
+    exportToCSV: 'Export to CSV',
+    openInNewTab: 'Open in New Tab (Recommended)',
+    tryAgain: 'Try Again',
+    reloadApp: 'Reload App',
+    initializingCamera: 'Initializing camera...',
+    cameraInstructions: 'Point your camera at a barcode to scan it automatically.',
+    cameraPermissionDenied: 'Camera permission denied. Please allow camera access in your browser settings. If you are using an iPhone, make sure to allow camera access for this website in Safari settings. Alternatively, try opening the app in a new tab.',
+    cameraNotFound: 'Camera not found or not compatible. Please try a different device.',
+    switchCamera: 'Switch Camera'
   },
   mm: {
     dashboard: 'ပင်မစာမျက်နှာ',
@@ -539,7 +557,7 @@ const TRANSLATIONS = {
     credit: 'အကြွေး',
     paidAmount: 'ပေးချေပြီးငွေ',
     transactionDetails: 'ငွေပေးချေမှု အသေးစိတ်',
-    kyatsOnly: 'ကျပ်တိတိ',
+    kyatsOnly: 'တိတိ',
     currency: 'ကျပ်',
     phoneLabel: 'ဖုန်း',
     save: 'သိမ်းမည်',
@@ -593,17 +611,33 @@ const TRANSLATIONS = {
     used: 'အဟောင်း',
     allConditions: 'အခြေအနေအားလုံး',
     selectCondition: 'အခြေအနေရွေးချယ်ပါ',
+    allBrands: 'အမှတ်တံဆိပ်အားလုံး',
     scan: 'စကင်ဖတ်ရန်',
     brand: 'အမှတ်တံဆိပ်',
     payDebt: 'အကြွေးဆပ်ရန်',
     autoPrint: 'ငွေရှင်းပြီးလျှင် အလိုအလျောက် ပရင့်ထုတ်မည်',
     reports: 'အစီရင်ခံစာများ',
+    selectCurrency: 'ငွေကြေးအမျိုးအစား ရွေးချယ်ရန်',
     startDate: 'စတင်သည့်နေ့',
     endDate: 'ပြီးဆုံးသည့်နေ့',
     generateReport: 'အစီရင်ခံစာထုတ်မည်',
     salesReport: 'အရောင်းအစီရင်ခံစာ',
+    expensesReport: 'အသုံးစရိတ် အစီရင်ခံစာ',
+    profitLoss: 'အရှုံးအမြတ် စာရင်း',
+    editExpense: 'အသုံးစရိတ် ပြင်ဆင်ရန်',
+    updateExpense: 'အသုံးစရိတ် ပြင်မည်',
+    expenseSummary: 'အသုံးစရိတ် အကျဉ်းချုပ်',
+    categorySummary: 'အမျိုးအစားအလိုက် အကျဉ်းချုပ်',
     noReportsFound: 'ရွေးချယ်ထားသော အချက်အလက်များအတွက် အစီရင်ခံစာမရှိပါ',
-    exportToCSV: 'CSV ထုတ်ယူမည်'
+    exportToCSV: 'CSV ထုတ်ယူမည်',
+    openInNewTab: 'တက်ဘ်အသစ်တွင်ဖွင့်ပါ (အကြံပြုချက်)',
+    tryAgain: 'ပြန်လည်ကြိုးစားပါ',
+    reloadApp: 'အက်ပ်ကို ပြန်ဖွင့်ပါ',
+    initializingCamera: 'ကင်မရာကို စတင်နေပါသည်...',
+    cameraInstructions: 'ဘားကုဒ်ကို အလိုအလျောက် စကင်ဖတ်ရန် ကင်မရာကို ချိန်ပေးပါ။',
+    cameraPermissionDenied: 'ကင်မရာ အသုံးပြုခွင့်ကို ငြင်းပယ်ထားပါသည်။ ဘရောက်ဇာ ဆက်တင်တွင် ကင်မရာ အသုံးပြုခွင့် ပေးပါ။ iPhone အသုံးပြုပါက Safari ဆက်တင်တွင် ကင်မရာ အသုံးပြုခွင့် ပေးထားကြောင်း စစ်ဆေးပါ။ သို့မဟုတ် တက်ဘ်အသစ်တွင် ဖွင့်ကြည့်ပါ။',
+    cameraNotFound: 'ကင်မရာ ရှာမတွေ့ပါ သို့မဟုတ် အသုံးပြု၍ မရပါ။ အခြား စက်ပစ္စည်းဖြင့် စမ်းကြည့်ပါ။',
+    switchCamera: 'ကင်မရာ ပြောင်းမည်'
   }
 };
 
@@ -753,7 +787,7 @@ const exportSalesReportToCSV = (data: Sale[], t: any) => {
     sale.paymentMethod || '-',
     sale.totalAmount,
     sale.profit,
-    sale.items.map(item => `${item.name} x${item.quantity}`).join('; ')
+    (sale.items || []).map(item => `${item.name} x${item.quantity}`).join('; ')
   ]);
 
   const csvContent = [
@@ -903,10 +937,33 @@ export class ErrorBoundary extends React.Component<{children: React.ReactNode}, 
 
 function App() {
   const [isAuthReady, setIsAuthReady] = useState(false);
+  const [isFirestoreOffline, setIsFirestoreOffline] = useState(false);
+  const [firestoreError, setFirestoreError] = useState<string | null>(null);
 
   useEffect(() => {
     const timer = setTimeout(() => setIsAuthReady(true), 1000);
     return () => clearTimeout(timer);
+  }, []);
+
+  // Monitor Firestore connectivity
+  useEffect(() => {
+    const testConn = async () => {
+      try {
+        const { doc, getDocFromServer } = await import('firebase/firestore');
+        await getDocFromServer(doc(db, '_connection_test_', 'ping'));
+        setIsFirestoreOffline(false);
+        setFirestoreError(null);
+      } catch (error: any) {
+        if (error.message && error.message.includes('the client is offline')) {
+          setIsFirestoreOffline(true);
+        } else if (error.code === 'permission-denied') {
+          setFirestoreError("Missing or insufficient permissions. Please check your security rules.");
+        } else {
+          console.warn("Initial connection test failed, but might be normal:", error);
+        }
+      }
+    };
+    testConn();
   }, []);
 
   const [isAuthenticated, setIsAuthenticated] = useState(() => {
@@ -957,6 +1014,8 @@ function App() {
   const [newCategoryInput, setNewCategoryInput] = useState('');
 
   const [activeTab, setActiveTab] = useState<'dashboard' | 'products' | 'pos' | 'history' | 'settings' | 'expenses' | 'customers' | 'reports'>('pos');
+  const [currency, setCurrency] = useState('MMK');
+  const [reportTab, setReportTab] = useState<'sales' | 'expenses' | 'profit_loss'>('sales');
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isCartOpen, setIsCartOpen] = useState(false);
   const [isLanguageMenuOpen, setIsLanguageMenuOpen] = useState(false);
@@ -1045,6 +1104,16 @@ function App() {
     }
   };
 
+  const updateExpense = async (id: string, expenseData: Partial<Expense>) => {
+    setEditingExpense(null);
+    const path = 'expenses';
+    try {
+      await updateDoc(doc(db, path, id), expenseData);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, path);
+    }
+  };
+
   const addExpenseCategory = async (name: string) => {
     const path = 'expenseCategories';
     try {
@@ -1095,6 +1164,8 @@ function App() {
   const [selectedEndDate, setSelectedEndDate] = useState<string>('');
   const dateInputRef = useRef<HTMLInputElement>(null);
   const endDateInputRef = useRef<HTMLInputElement>(null);
+  const reportStartDateInputRef = useRef<HTMLInputElement>(null);
+  const reportEndDateInputRef = useRef<HTMLInputElement>(null);
   const [filterPaymentMethod, setFilterPaymentMethod] = useState<string>('');
   const [filterCustomerName, setFilterCustomerName] = useState<string>('');
   const [saleToDelete, setSaleToDelete] = useState<string | null>(null);
@@ -1130,6 +1201,7 @@ function App() {
   };
 
   const [isAddExpenseOpen, setIsAddExpenseOpen] = useState(false);
+  const [editingExpense, setEditingExpense] = useState<Expense | null>(null);
   const [isAddCustomerOpen, setIsAddCustomerOpen] = useState(false);
   const [isDeleteSampleConfirm, setIsDeleteSampleConfirm] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
@@ -1147,6 +1219,7 @@ function App() {
       if (snapshot.exists()) {
         const data = snapshot.data();
         if (data.receiptSettings) setReceiptSettings(data.receiptSettings);
+        if (data.currency) setCurrency(data.currency);
       }
     });
     return () => unsubSettings();
@@ -1326,12 +1399,12 @@ function App() {
       let matchesDate = true;
       if (selectedDate) {
         const saleDate = new Date(sale.timestamp);
-        const start = new Date(selectedDate);
-        start.setHours(0, 0, 0, 0);
+        const [sYear, sMonth, sDay] = selectedDate.split('-').map(Number);
+        const start = new Date(sYear, sMonth - 1, sDay, 0, 0, 0, 0);
         
         if (selectedEndDate) {
-          const end = new Date(selectedEndDate);
-          end.setHours(23, 59, 59, 999);
+          const [eYear, eMonth, eDay] = selectedEndDate.split('-').map(Number);
+          const end = new Date(eYear, eMonth - 1, eDay, 23, 59, 59, 999);
           matchesDate = sale.timestamp >= start.getTime() && sale.timestamp <= end.getTime();
         } else {
           const year = saleDate.getFullYear();
@@ -1359,20 +1432,27 @@ function App() {
   }, [sales, selectedDate, selectedEndDate, filterPaymentMethod, filterCustomerName, selectedBranchId]);
 
   const filteredReports = useMemo(() => {
+    let start: Date | null = null;
+    if (reportStartDate) {
+      const [year, month, day] = reportStartDate.split('-').map(Number);
+      if (year && month && day) {
+        start = new Date(year, month - 1, day, 0, 0, 0, 0);
+      }
+    }
+
+    let end: Date | null = null;
+    if (reportEndDate) {
+      const [year, month, day] = reportEndDate.split('-').map(Number);
+      if (year && month && day) {
+        end = new Date(year, month - 1, day, 23, 59, 59, 999);
+      }
+    }
+
     return sales.filter(sale => {
       const saleDate = new Date(sale.timestamp);
-      const start = reportStartDate ? new Date(reportStartDate) : null;
-      const end = reportEndDate ? new Date(reportEndDate) : null;
       
-      if (start) {
-        start.setHours(0, 0, 0, 0);
-        if (saleDate < start) return false;
-      }
-      
-      if (end) {
-        end.setHours(23, 59, 59, 999);
-        if (saleDate > end) return false;
-      }
+      if (start && saleDate < start) return false;
+      if (end && saleDate > end) return false;
       
       if (reportPaymentMethod && sale.paymentMethod !== reportPaymentMethod) return false;
       
@@ -1383,6 +1463,35 @@ function App() {
       return true;
     }).sort((a, b) => b.timestamp - a.timestamp);
   }, [sales, reportStartDate, reportEndDate, reportPaymentMethod, reportCustomerName, selectedBranchId]);
+
+  const filteredExpenseReports = useMemo(() => {
+    let start: Date | null = null;
+    if (reportStartDate) {
+      const [year, month, day] = reportStartDate.split('-').map(Number);
+      if (year && month && day) {
+        start = new Date(year, month - 1, day, 0, 0, 0, 0);
+      }
+    }
+
+    let end: Date | null = null;
+    if (reportEndDate) {
+      const [year, month, day] = reportEndDate.split('-').map(Number);
+      if (year && month && day) {
+        end = new Date(year, month - 1, day, 23, 59, 59, 999);
+      }
+    }
+
+    return expenses.filter(expense => {
+      const expenseDate = new Date(expense.timestamp);
+      
+      if (start && expenseDate < start) return false;
+      if (end && expenseDate > end) return false;
+      
+      if (selectedBranchId !== 'all' && expense.branchId !== selectedBranchId) return false;
+
+      return true;
+    }).sort((a, b) => b.timestamp - a.timestamp);
+  }, [expenses, reportStartDate, reportEndDate, selectedBranchId]);
 
   const historyStats = useMemo(() => {
     const regularSales = filteredSales.filter(s => !s.isDebtPayment);
@@ -1503,6 +1612,7 @@ function App() {
         quantity: item.qty,
         price: item.product.price,
         cost: item.product.cost,
+        category: item.product.category,
         discountType: item.discountType,
         discountValue: item.discountValue
       })),
@@ -1565,6 +1675,7 @@ function App() {
           quantity: item.qty,
           price: item.product.price,
           cost: item.product.cost,
+          category: item.product.category,
           discountType: item.discountType,
           discountValue: item.discountValue
         })),
@@ -1639,6 +1750,7 @@ function App() {
         quantity: item.qty,
         price: item.product.price,
         cost: item.product.cost,
+        category: item.product.category,
         discountType: item.discountType,
         discountValue: item.discountValue
       })),
@@ -2102,7 +2214,7 @@ function App() {
       </AnimatePresence>
 
       <aside className={cn(
-        "fixed inset-y-0 left-0 w-64 bg-slate-900 border-r border-white/10 flex flex-col z-50 transition-transform duration-300 lg:relative lg:translate-x-0 shadow-2xl overflow-x-hidden",
+        "fixed inset-y-0 left-0 w-72 bg-slate-900 border-r border-white/10 flex flex-col z-50 transition-transform duration-300 lg:relative lg:translate-x-0 shadow-2xl overflow-x-hidden",
         isSidebarOpen ? "translate-x-0" : "-translate-x-full"
       )}>
         <div className="p-6 flex items-center justify-between">
@@ -2368,6 +2480,26 @@ function App() {
           </div>
         </header>
 
+        {(isFirestoreOffline || firestoreError) && (
+          <div className={cn(
+            "px-4 py-2 text-center text-xs font-bold flex items-center justify-center gap-2 shrink-0 z-40",
+            isFirestoreOffline ? "bg-amber-500 text-white" : "bg-red-600 text-white"
+          )}>
+            <AlertCircle size={14} />
+            {isFirestoreOffline ? (
+              <span>Firestore is currently offline. Changes will be synced when connection is restored.</span>
+            ) : (
+              <span>{firestoreError}</span>
+            )}
+            <button 
+              onClick={() => window.location.reload()}
+              className="ml-4 underline hover:no-underline"
+            >
+              Retry
+            </button>
+          </div>
+        )}
+
         <div className="flex-1 overflow-hidden flex flex-col relative">
           {/* Subtle top gradient for depth */}
           <div className="absolute top-0 left-0 right-0 h-4 bg-gradient-to-b from-slate-200/20 dark:from-black/20 to-transparent pointer-events-none z-20" />
@@ -2379,18 +2511,18 @@ function App() {
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -10 }}
-                className="space-y-4 h-full overflow-y-auto p-4 lg:p-6 pb-20"
+                className="flex-1 h-full min-h-0 overflow-y-auto p-4 lg:p-6 pb-20 space-y-4"
               >
                 <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 lg:gap-5">
-                  <StatCard title={t.totalSales} value={stats.totalSales} icon={<DollarSign size={18} />} color="sky" unit="MMK" />
+                  <StatCard title={t.totalSales} value={stats.totalSales} icon={<DollarSign size={18} />} color="sky" unit={currency} />
                   {currentUser?.role === 'admin' && (
                     <>
-                      <StatCard title={t.totalProfit} value={stats.totalProfit} icon={<TrendingUp size={18} />} color="emerald" unit="MMK" />
-                      <StatCard title={t.totalExpenses} value={stats.totalExpenses} icon={<Wallet size={18} />} color="rose" unit="MMK" />
-                      <StatCard title={t.netProfit} value={stats.netProfit} icon={<CheckCircle2 size={18} />} color="indigo" unit="MMK" />
+                      <StatCard title={t.totalProfit} value={stats.totalProfit} icon={<TrendingUp size={18} />} color="emerald" unit={currency} />
+                      <StatCard title={t.totalExpenses} value={stats.totalExpenses} icon={<Wallet size={18} />} color="rose" unit={currency} />
+                      <StatCard title={t.netProfit} value={stats.netProfit} icon={<CheckCircle2 size={18} />} color="indigo" unit={currency} />
                     </>
                   )}
-                  <StatCard title={t.inventoryValue} value={stats.inventoryValue} icon={<Package size={18} />} color="amber" unit="MMK" />
+                  <StatCard title={t.inventoryValue} value={stats.inventoryValue} icon={<Package size={18} />} color="amber" unit={currency} />
                   <StatCard title={t.totalOrders} value={stats.totalOrders} icon={<ShoppingBag size={18} />} color="violet" unit={t.items} />
                 </div>
 
@@ -2460,7 +2592,7 @@ function App() {
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 exit={{ opacity: 0 }}
-                className="flex flex-col lg:flex-row gap-4 lg:gap-6 h-full overflow-hidden p-4 lg:p-6 pb-20"
+                className="flex flex-col lg:flex-row gap-4 lg:gap-6 flex-1 min-h-0 w-full overflow-y-auto lg:overflow-hidden p-4 lg:p-6 pb-20"
               >
                 {/* Product Selection */}
                 <div className="flex-1 flex flex-col min-h-0 overflow-hidden pr-0">
@@ -2546,7 +2678,7 @@ function App() {
                             
                             <div className="flex items-center justify-between mt-auto">
                               <p className="text-indigo-600 dark:text-indigo-400 font-bold text-[11px] sm:text-[13px]">
-                                {product.price.toLocaleString()} <span className="text-[8px] sm:text-[10px] font-bold text-indigo-400 dark:text-indigo-500 ml-0.5 uppercase">MMK</span>
+                                {product.price.toLocaleString()} <span className="text-[8px] sm:text-[10px] font-bold text-indigo-400 dark:text-indigo-500 ml-0.5 uppercase">{currency}</span>
                               </p>
                               <div className="w-6 h-6 sm:w-7 sm:h-7 bg-slate-50 dark:bg-slate-800 rounded-lg flex items-center justify-center text-slate-400 dark:text-slate-500 group-hover:bg-indigo-600 group-hover:text-white transition-all duration-200 shadow-sm border border-slate-100 dark:border-slate-700">
                                 <Plus className="w-2.5 h-2.5 sm:w-3 sm:h-3" strokeWidth={3} />
@@ -2653,6 +2785,7 @@ function App() {
                               setSelectedCustomerForDebt(customer);
                               setIsDebtPaymentOpen(true);
                             }}
+                            currency={currency}
                           />
                         </div>
                       </motion.div>
@@ -2668,7 +2801,7 @@ function App() {
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 exit={{ opacity: 0 }}
-                className="flex flex-col h-full p-2 sm:p-4 lg:p-6 overflow-y-auto lg:overflow-hidden pb-20"
+                className="flex flex-col flex-1 min-h-0 p-2 sm:p-4 lg:p-6 overflow-y-auto lg:overflow-hidden pb-20"
               >
                 {isInventoryScannerOpen && (
                   <BarcodeScannerModal 
@@ -2728,86 +2861,40 @@ function App() {
                   </div>
                 </div>
 
-                {/* Category Filter Bar */}
-                <div className="flex items-center gap-2 overflow-x-auto pb-3 mb-1 px-2 scrollbar-hide shrink-0">
-                  <button
-                    onClick={() => { setSelectedCategory('All'); setSelectedBrand('All'); }}
-                    className={cn(
-                      "px-4 py-2 rounded-full text-sm font-bold whitespace-nowrap transition-all",
-                      selectedCategory === 'All' 
-                        ? "bg-indigo-600 text-white shadow-md shadow-indigo-500/20" 
-                        : "bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700"
-                    )}
-                  >
-                    {t.allCategories || 'All Categories'}
-                  </button>
-                  {[
-                    { label: 'Smartphones', category: 'Smartphones', brand: 'All' },
-                    { label: 'Tablet', category: 'Tablets', brand: 'All' },
-                    { label: 'Accessories', category: 'Accessories', brand: 'All' }
-                  ].map(filter => (
-                    <button
-                      key={filter.label}
-                      onClick={() => { setSelectedCategory(filter.category); setSelectedBrand(filter.brand); }}
-                      className={cn(
-                        "px-4 py-2 rounded-full text-sm font-bold whitespace-nowrap transition-all",
-                        selectedCategory === filter.category && selectedBrand === filter.brand
-                          ? "bg-indigo-600 text-white shadow-md shadow-indigo-500/20" 
-                          : "bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700"
-                      )}
+                {/* Category & Brand Filter Dropdowns */}
+                <div className="flex flex-wrap items-center gap-3 mb-4 px-2 shrink-0">
+                  <div className="relative group">
+                    <Filter className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-indigo-500 transition-colors" size={16} />
+                    <select
+                      value={selectedCategory}
+                      onChange={(e) => { setSelectedCategory(e.target.value); setSelectedBrand('All'); }}
+                      className="pl-10 pr-10 py-2 bg-white dark:bg-slate-800 border-2 border-slate-200 dark:border-slate-700 rounded-full text-sm font-bold focus:ring-2 focus:ring-indigo-500 outline-none transition-all text-slate-900 dark:text-white shadow-sm appearance-none cursor-pointer hover:border-slate-300 dark:hover:border-slate-600"
                     >
-                      {filter.label}
-                    </button>
-                  ))}
-
-                  <div className="w-px h-6 bg-slate-200 dark:bg-slate-700 mx-1 shrink-0"></div>
-
-                  {categories.filter(c => !['Smartphones', 'Tablets', 'Accessories'].includes(c)).map(category => (
-                    <button
-                      key={category}
-                      onClick={() => { setSelectedCategory(category); setSelectedBrand('All'); }}
-                      className={cn(
-                        "px-4 py-2 rounded-full text-sm font-bold whitespace-nowrap transition-all",
-                        selectedCategory === category && selectedBrand === 'All'
-                          ? "bg-indigo-600 text-white shadow-md shadow-indigo-500/20" 
-                          : "bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700"
-                      )}
-                    >
-                      {category}
-                    </button>
-                  ))}
-                </div>
-
-                {/* Brand Filter Bar (Only for Smartphones) */}
-                {selectedCategory === 'Smartphones' && (
-                  <div className="flex items-center gap-2 overflow-x-auto pb-3 mb-2 px-2 scrollbar-hide shrink-0">
-                    <button
-                      onClick={() => setSelectedBrand('All')}
-                      className={cn(
-                        "px-3 py-1.5 rounded-full text-xs font-bold whitespace-nowrap transition-all",
-                        selectedBrand === 'All' 
-                          ? "bg-indigo-100 text-indigo-700 dark:bg-indigo-900/50 dark:text-indigo-300" 
-                          : "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700"
-                      )}
-                    >
-                      All Brands
-                    </button>
-                    {SMARTPHONE_BRANDS.map(brand => (
-                      <button
-                        key={brand}
-                        onClick={() => setSelectedBrand(brand)}
-                        className={cn(
-                          "px-3 py-1.5 rounded-full text-xs font-bold whitespace-nowrap transition-all",
-                          selectedBrand === brand 
-                            ? "bg-indigo-100 text-indigo-700 dark:bg-indigo-900/50 dark:text-indigo-300" 
-                            : "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700"
-                        )}
-                      >
-                        {brand}
-                      </button>
-                    ))}
+                      <option value="All">{t.allCategories || 'All Categories'}</option>
+                      {categories.map(category => (
+                        <option key={category} value={category}>{category}</option>
+                      ))}
+                    </select>
+                    <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" size={14} />
                   </div>
-                )}
+                  
+                  {/* Brand Filter (Only for Smartphones) */}
+                  {selectedCategory === 'Smartphones' && (
+                    <div className="relative group animate-in fade-in slide-in-from-left-2 duration-200">
+                      <select
+                        value={selectedBrand}
+                        onChange={(e) => setSelectedBrand(e.target.value)}
+                        className="pl-4 pr-10 py-2 bg-indigo-50 dark:bg-indigo-900/30 border-2 border-indigo-100 dark:border-indigo-800/50 rounded-full text-sm font-bold focus:ring-2 focus:ring-indigo-500 outline-none transition-all text-indigo-700 dark:text-indigo-300 shadow-sm appearance-none cursor-pointer hover:border-indigo-200 dark:hover:border-indigo-700"
+                      >
+                        <option value="All">{t.allBrands || 'All Brands'}</option>
+                        {SMARTPHONE_BRANDS.map(brand => (
+                          <option key={brand} value={brand}>{brand}</option>
+                        ))}
+                      </select>
+                      <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 text-indigo-400 pointer-events-none" size={14} />
+                    </div>
+                  )}
+                </div>
 
                 <div className="bg-white dark:bg-slate-900/80 rounded-xl border-2 border-slate-300 dark:border-slate-800 shadow-sm overflow-visible lg:overflow-hidden backdrop-blur-xl lg:flex-1 flex flex-col min-h-0 shrink-0 lg:shrink">
                   <div className="overflow-y-visible lg:overflow-y-auto lg:flex-1">
@@ -3005,7 +3092,7 @@ function App() {
                             
                             <div className="flex items-center justify-between mt-3">
                               <div className="flex flex-col">
-                                <span className="text-sm font-black text-indigo-600 dark:text-indigo-400">{product.price.toLocaleString()} MMK</span>
+                                <span className="text-sm font-black text-indigo-600 dark:text-indigo-400">{product.price.toLocaleString()} {currency}</span>
                                 <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-bold">Profit: +{(product.price - product.cost).toLocaleString()}</span>
                               </div>
                               
@@ -3052,7 +3139,7 @@ function App() {
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 exit={{ opacity: 0 }}
-                className="flex flex-col h-full overflow-hidden"
+                className="flex flex-col flex-1 min-h-0 w-full overflow-y-auto lg:overflow-hidden"
               >
                 <div className="p-4 lg:p-6 pb-0 shrink-0">
                   <div className="flex flex-col gap-4 mb-4">
@@ -3064,7 +3151,7 @@ function App() {
                         </div>
                         <div className="min-w-0">
                           <p className="text-[8px] sm:text-[9px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest mb-0.5">{t.totalSales}</p>
-                          <p className="text-sm sm:text-base font-black text-slate-900 dark:text-white leading-none">{historyStats.totalSales.toLocaleString()} <span className="text-[8px] sm:text-[9px] text-slate-400">MMK</span></p>
+                          <p className="text-sm sm:text-base font-black text-slate-900 dark:text-white leading-none">{historyStats.totalSales.toLocaleString()} <span className="text-[8px] sm:text-[9px] text-slate-400">{currency}</span></p>
                         </div>
                       </div>
 
@@ -3076,7 +3163,7 @@ function App() {
                             </div>
                             <div className="min-w-0">
                               <p className="text-[8px] sm:text-[9px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest mb-0.5">{t.totalProfit}</p>
-                              <p className="text-sm sm:text-base font-black text-emerald-600 dark:text-emerald-400 leading-none">{historyStats.totalProfit.toLocaleString()} <span className="text-[8px] sm:text-[9px] text-slate-400">MMK</span></p>
+                              <p className="text-sm sm:text-base font-black text-emerald-600 dark:text-emerald-400 leading-none">{historyStats.totalProfit.toLocaleString()} <span className="text-[8px] sm:text-[9px] text-slate-400">{currency}</span></p>
                             </div>
                           </div>
 
@@ -3086,7 +3173,7 @@ function App() {
                             </div>
                             <div className="min-w-0">
                               <p className="text-[8px] sm:text-[9px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest mb-0.5">{t.totalExpenses}</p>
-                              <p className="text-sm sm:text-base font-black text-rose-600 dark:text-rose-400 leading-none">{historyStats.totalExpenses.toLocaleString()} <span className="text-[8px] sm:text-[9px] text-slate-400">MMK</span></p>
+                              <p className="text-sm sm:text-base font-black text-rose-600 dark:text-rose-400 leading-none">{historyStats.totalExpenses.toLocaleString()} <span className="text-[8px] sm:text-[9px] text-slate-400">{currency}</span></p>
                             </div>
                           </div>
 
@@ -3096,7 +3183,7 @@ function App() {
                             </div>
                             <div className="min-w-0">
                               <p className="text-[8px] sm:text-[9px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest mb-0.5">{t.netProfit}</p>
-                              <p className="text-sm sm:text-base font-black text-indigo-600 dark:text-indigo-400 leading-none">{historyStats.netProfit.toLocaleString()} <span className="text-[8px] sm:text-[9px] text-slate-400">MMK</span></p>
+                              <p className="text-sm sm:text-base font-black text-indigo-600 dark:text-indigo-400 leading-none">{historyStats.netProfit.toLocaleString()} <span className="text-[8px] sm:text-[9px] text-slate-400">{currency}</span></p>
                             </div>
                           </div>
                         </>
@@ -3224,7 +3311,7 @@ function App() {
                   </div>
                 </div>
 
-                <div className="flex-1 overflow-y-auto p-4 lg:p-6 pt-0 space-y-1.5 pb-28">
+                <div className="flex-1 min-h-0 lg:overflow-y-auto p-4 lg:p-6 pt-0 space-y-1.5 pb-32">
                   {filteredSales.map(sale => (
                     <div key={sale.id} className="glass-panel rounded-lg neo-3d border-l-2 border-indigo-500 overflow-hidden group hover:-translate-y-0.5 transition-all duration-300">
                       <div className="p-2 flex flex-col lg:flex-row lg:items-center justify-between gap-2">
@@ -3249,7 +3336,7 @@ function App() {
                                     </span>
                                     {item.discountValue > 0 && (
                                       <span className="text-[9px] font-bold text-rose-500 dark:text-rose-400 bg-rose-50 dark:bg-rose-900/20 px-1 rounded border border-rose-100 dark:border-rose-800/30">
-                                        -{item.discountType === 'percentage' ? `${item.discountValue}%` : `${item.discountValue.toLocaleString()} ${t.currency}`}
+                                        -{item.discountType === 'percentage' ? `${item.discountValue}%` : `${item.discountValue.toLocaleString()} ${currency}`}
                                       </span>
                                     )}
                                     {item.quantity > 1 && (
@@ -3301,7 +3388,7 @@ function App() {
                             <div className="flex flex-col">
                               <span className="text-base sm:text-lg font-black text-slate-900 dark:text-white tracking-tighter leading-none">
                                 {sale.totalAmount.toLocaleString()}
-                                <span className="text-[8px] font-bold text-slate-400 ml-0.5 uppercase">MMK</span>
+                                <span className="text-[8px] font-bold text-slate-400 ml-0.5 uppercase">{currency}</span>
                               </span>
                               {currentUser?.role === 'admin' && (
                                 <div className="flex items-center lg:justify-end gap-0.5 mt-0.5">
@@ -3354,193 +3441,469 @@ function App() {
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 exit={{ opacity: 0 }}
-                className="flex flex-col h-full overflow-hidden"
+                className="flex flex-col flex-1 min-h-0 w-full overflow-y-auto lg:overflow-hidden"
               >
-                <div className="p-4 lg:p-6 pb-0 shrink-0">
+                <div className="p-2 sm:p-4 lg:p-6 pb-0 shrink-0">
                   <div className="flex flex-col gap-4 mb-6">
                     <div className="flex items-center justify-between">
-                      <h3 className="text-xl font-bold text-slate-900 dark:text-white uppercase tracking-widest">{t.salesReport}</h3>
-                      <button 
-                        onClick={() => exportSalesReportToCSV(filteredReports, t)}
-                        className="bg-indigo-600 text-white px-4 py-2 rounded-xl font-bold hover:bg-indigo-700 transition-all flex items-center gap-2 shadow-lg shadow-indigo-500/20 text-sm"
-                      >
-                        <Download size={18} />
-                        {t.exportCSV}
-                      </button>
+                      <div className="flex items-center gap-4">
+                        <h3 className="text-xl font-bold text-slate-900 dark:text-white uppercase tracking-widest">
+                          {reportTab === 'sales' ? t.salesReport : reportTab === 'expenses' ? t.expensesReport : t.profitLoss}
+                        </h3>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <div className="flex bg-slate-100 dark:bg-slate-800 p-1 rounded-xl border border-slate-200 dark:border-slate-700">
+                          <button 
+                            onClick={() => setReportTab('sales')}
+                            className={cn(
+                              "px-4 py-1.5 text-[10px] font-black uppercase tracking-widest rounded-lg transition-all",
+                              reportTab === 'sales' ? "bg-white dark:bg-slate-700 text-indigo-600 dark:text-indigo-400 shadow-sm" : "text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300"
+                            )}
+                          >
+                            {t.pos}
+                          </button>
+                          <button 
+                            onClick={() => setReportTab('expenses')}
+                            className={cn(
+                              "px-4 py-1.5 text-[10px] font-black uppercase tracking-widest rounded-lg transition-all",
+                              reportTab === 'expenses' ? "bg-white dark:bg-slate-700 text-indigo-600 dark:text-indigo-400 shadow-sm" : "text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300"
+                            )}
+                          >
+                            {t.expenses}
+                          </button>
+                          <button 
+                            onClick={() => setReportTab('profit_loss')}
+                            className={cn(
+                              "px-4 py-1.5 text-[10px] font-black uppercase tracking-widest rounded-lg transition-all",
+                              reportTab === 'profit_loss' ? "bg-white dark:bg-slate-700 text-indigo-600 dark:text-indigo-400 shadow-sm" : "text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300"
+                            )}
+                          >
+                            {t.profitLoss}
+                          </button>
+                        </div>
+                        {reportTab !== 'profit_loss' && (
+                          <button 
+                            onClick={() => reportTab === 'sales' ? exportSalesReportToCSV(filteredReports, t) : exportExpensesToCSV(filteredExpenseReports, t, branches)}
+                            className="bg-indigo-600 text-white px-4 py-2 rounded-xl font-bold hover:bg-indigo-700 transition-all flex items-center gap-2 shadow-lg shadow-indigo-500/20 text-sm"
+                          >
+                            <Download size={18} />
+                            <span className="hidden sm:inline">{t.exportCSV}</span>
+                          </button>
+                        )}
+                      </div>
                     </div>
 
                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-                    <div className="space-y-1">
-                      <label className="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest ml-1">{t.startDate}</label>
-                      <input
-                        type="date"
-                        value={reportStartDate}
-                        onChange={(e) => setReportStartDate(e.target.value)}
-                        className="w-full px-4 py-2.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm font-bold text-slate-900 dark:text-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all shadow-sm"
-                      />
-                    </div>
-                    <div className="space-y-1">
-                      <label className="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest ml-1">{t.endDate}</label>
-                      <input
-                        type="date"
-                        value={reportEndDate}
-                        onChange={(e) => setReportEndDate(e.target.value)}
-                        className="w-full px-4 py-2.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm font-bold text-slate-900 dark:text-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all shadow-sm"
-                      />
-                    </div>
-                    <div className="space-y-1">
-                      <label className="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest ml-1">{t.paymentMethod}</label>
-                      <select
-                        value={reportPaymentMethod}
-                        onChange={(e) => setReportPaymentMethod(e.target.value)}
-                        className="w-full px-4 py-2.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm font-bold text-slate-900 dark:text-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none cursor-pointer transition-all shadow-sm appearance-none"
+                      <div className="space-y-1 relative"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (reportStartDateInputRef.current) {
+                            try {
+                              reportStartDateInputRef.current.showPicker();
+                            } catch (err) {
+                              reportStartDateInputRef.current.focus();
+                            }
+                          }
+                        }}
                       >
-                        <option value="">{t.allPaymentMethods}</option>
-                        <option value="Cash">{t.cash}</option>
-                        <option value="KPay">{t.kpay}</option>
-                        <option value="WavePay">{t.wavepay}</option>
-                        <option value="AYA pay">{t.ayapay}</option>
-                        <option value="YOMA bank">{t.yomabank}</option>
-                        <option value="Bank Transfer">{t.bankTransfer}</option>
-                      </select>
-                    </div>
-                    <div className="space-y-1">
-                      <label className="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest ml-1">{t.customerName}</label>
-                      <div className="relative">
-                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
+                        <label className="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest ml-1">{t.startDate}</label>
                         <input
-                          type="text"
-                          value={reportCustomerName}
-                          onChange={(e) => setReportCustomerName(e.target.value)}
-                          placeholder={t.filterByCustomer}
-                          className="w-full pl-10 pr-4 py-2.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm font-bold text-slate-900 dark:text-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all shadow-sm"
+                          ref={reportStartDateInputRef}
+                          type="date"
+                          value={reportStartDate}
+                          onChange={(e) => setReportStartDate(e.target.value)}
+                          className="w-full px-4 py-2.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm font-bold text-slate-900 dark:text-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none cursor-pointer transition-all shadow-sm relative z-10"
                         />
                       </div>
+                      <div className="space-y-1 relative"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (reportEndDateInputRef.current) {
+                            try {
+                              reportEndDateInputRef.current.showPicker();
+                            } catch (err) {
+                              reportEndDateInputRef.current.focus();
+                            }
+                          }
+                        }}
+                      >
+                        <label className="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest ml-1">{t.endDate}</label>
+                        <input
+                          ref={reportEndDateInputRef}
+                          type="date"
+                          value={reportEndDate}
+                          onChange={(e) => setReportEndDate(e.target.value)}
+                          className="w-full px-4 py-2.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm font-bold text-slate-900 dark:text-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none cursor-pointer transition-all shadow-sm relative z-10"
+                        />
+                      </div>
+                      {reportTab === 'sales' && (
+                        <>
+                          <div className="space-y-1">
+                            <label className="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest ml-1">{t.paymentMethod}</label>
+                            <select
+                              value={reportPaymentMethod}
+                              onChange={(e) => setReportPaymentMethod(e.target.value)}
+                              className="w-full px-4 py-2.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm font-bold text-slate-900 dark:text-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none cursor-pointer transition-all shadow-sm appearance-none"
+                            >
+                              <option value="">{t.allPaymentMethods}</option>
+                              <option value="Cash">{t.cash}</option>
+                              <option value="KPay">{t.kpay}</option>
+                              <option value="WavePay">{t.wavepay}</option>
+                              <option value="AYA pay">{t.ayapay}</option>
+                              <option value="YOMA bank">{t.yomabank}</option>
+                              <option value="Bank Transfer">{t.bankTransfer}</option>
+                            </select>
+                          </div>
+                          <div className="space-y-1">
+                            <label className="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest ml-1">{t.customerName}</label>
+                            <div className="relative">
+                              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
+                              <input
+                                type="text"
+                                value={reportCustomerName}
+                                onChange={(e) => setReportCustomerName(e.target.value)}
+                                placeholder={t.filterByCustomer}
+                                className="w-full pl-10 pr-4 py-2.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm font-bold text-slate-900 dark:text-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all shadow-sm"
+                              />
+                            </div>
+                          </div>
+                        </>
+                      )}
+                    </div>
+
+                    <div className="flex justify-end">
+                      <button 
+                        onClick={() => {
+                          setReportStartDate('');
+                          setReportEndDate('');
+                          setReportPaymentMethod('');
+                          setReportCustomerName('');
+                        }}
+                        className="text-xs font-bold text-red-500 hover:text-red-600 transition-colors flex items-center gap-1"
+                      >
+                        <X size={14} />
+                        {t.clearAll}
+                      </button>
                     </div>
                   </div>
 
-                  <div className="flex justify-end">
-                    <button 
-                      onClick={() => {
-                        setReportStartDate('');
-                        setReportEndDate('');
-                        setReportPaymentMethod('');
-                        setReportCustomerName('');
-                      }}
-                      className="text-xs font-bold text-red-500 hover:text-red-600 transition-colors flex items-center gap-1"
-                    >
-                      <X size={14} />
-                      {t.clearAll}
-                    </button>
-                  </div>
-                </div>
+                  <div className="flex-1 min-h-0 overflow-hidden flex flex-col glass-panel rounded-xl neo-3d mx-2 sm:mx-4 lg:mx-6 mb-6">
+                    {reportTab === 'sales' && (
+                      <>
+                        {/* Desktop Table View */}
+                        <div className="hidden sm:block overflow-x-auto overflow-y-auto flex-1 min-h-0">
+                          <table className="w-full text-left border-collapse">
+                            <thead>
+                              <tr className="bg-slate-50 dark:bg-slate-800/50 border-b border-slate-200 dark:border-slate-700">
+                                <th className="px-4 py-3 text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest">{t.date}</th>
+                                <th className="px-4 py-3 text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest">{t.orderId}</th>
+                                <th className="px-4 py-3 text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest">{t.customerName}</th>
+                                <th className="px-4 py-3 text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest">{t.paymentMethod}</th>
+                                <th className="px-4 py-3 text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest text-right">{t.total}</th>
+                                <th className="px-4 py-3 text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest text-right">{t.profit}</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                              {filteredReports.map(sale => (
+                                <tr key={sale.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/30 transition-colors group">
+                                  <td className="px-4 py-3 whitespace-nowrap">
+                                    <div className="flex flex-col">
+                                      <span className="text-xs font-bold text-slate-900 dark:text-white">{new Date(sale.timestamp).toLocaleDateString()}</span>
+                                      <span className="text-[10px] text-slate-400">{new Date(sale.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                                    </div>
+                                  </td>
+                                  <td className="px-4 py-3 text-xs font-mono text-slate-500 dark:text-slate-400">#{sale.id.slice(-8)}</td>
+                                  <td className="px-4 py-3">
+                                    <span className="text-xs font-bold text-slate-700 dark:text-slate-300">{sale.customerName || t.walkInCustomer}</span>
+                                  </td>
+                                  <td className="px-4 py-3">
+                                    <span className="text-[10px] font-black bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400 px-2 py-0.5 rounded-full uppercase tracking-widest border border-indigo-100 dark:border-indigo-800/30">
+                                      {sale.paymentMethod || '-'}
+                                    </span>
+                                  </td>
+                                  <td className="px-4 py-3 text-right text-xs font-black text-slate-900 dark:text-white">
+                                    {sale.totalAmount.toLocaleString()} <span className="text-[9px] text-slate-400">{currency}</span>
+                                  </td>
+                                  <td className="px-4 py-3 text-right text-xs font-black text-emerald-600 dark:text-emerald-400">
+                                    +{sale.profit.toLocaleString()} <span className="text-[9px] text-emerald-400/50">{currency}</span>
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                            {filteredReports.length > 0 && (
+                              <tfoot>
+                                <tr className="bg-slate-50 dark:bg-slate-800/50 border-t-2 border-slate-200 dark:border-slate-700">
+                                  <td colSpan={4} className="px-4 py-3 text-right text-[10px] font-black text-slate-400 uppercase tracking-widest">{t.total}</td>
+                                  <td className="px-4 py-3 text-right text-sm font-black text-indigo-600 dark:text-indigo-400">
+                                    {filteredReports.reduce((sum, s) => sum + s.totalAmount, 0).toLocaleString()} <span className="text-[10px]">{currency}</span>
+                                  </td>
+                                  <td className="px-4 py-3 text-right text-sm font-black text-emerald-600 dark:text-emerald-400">
+                                    {filteredReports.reduce((sum, s) => sum + s.profit, 0).toLocaleString()} <span className="text-[10px]">{currency}</span>
+                                  </td>
+                                </tr>
+                              </tfoot>
+                            )}
+                          </table>
+                        </div>
 
-                <div className="flex-1 overflow-hidden flex flex-col glass-panel rounded-xl neo-3d mx-4 lg:mx-6 mb-24">
-                  {/* Desktop Table View */}
-                  <div className="hidden sm:block overflow-x-auto flex-1">
-                    <table className="w-full text-left border-collapse">
-                      <thead>
-                        <tr className="bg-slate-50 dark:bg-slate-800/50 border-b border-slate-200 dark:border-slate-700">
-                          <th className="px-4 py-3 text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest">{t.date}</th>
-                          <th className="px-4 py-3 text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest">{t.orderId}</th>
-                          <th className="px-4 py-3 text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest">{t.customerName}</th>
-                          <th className="px-4 py-3 text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest">{t.paymentMethod}</th>
-                          <th className="px-4 py-3 text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest text-right">{t.total}</th>
-                          <th className="px-4 py-3 text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest text-right">{t.profit}</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                        {filteredReports.map(sale => (
-                          <tr key={sale.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/30 transition-colors group">
-                            <td className="px-4 py-3 whitespace-nowrap">
-                              <div className="flex flex-col">
-                                <span className="text-xs font-bold text-slate-900 dark:text-white">{new Date(sale.timestamp).toLocaleDateString()}</span>
-                                <span className="text-[10px] text-slate-400">{new Date(sale.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                        {/* Mobile List View */}
+                        <div className="sm:hidden overflow-y-auto flex-1 min-h-0 p-2 space-y-2">
+                          {filteredReports.map(sale => (
+                            <div key={sale.id} className="bg-white dark:bg-slate-900 p-3 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm">
+                              <div className="flex items-center justify-between mb-2">
+                                <div className="flex flex-col">
+                                  <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{new Date(sale.timestamp).toLocaleDateString()}</span>
+                                  <span className="text-[10px] font-bold text-slate-500">{new Date(sale.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                                </div>
+                                <span className="text-[10px] font-mono text-slate-400">#{sale.id.slice(-8)}</span>
                               </div>
-                            </td>
-                            <td className="px-4 py-3 text-xs font-mono text-slate-500 dark:text-slate-400">#{sale.id.slice(-8)}</td>
-                            <td className="px-4 py-3">
-                              <span className="text-xs font-bold text-slate-700 dark:text-slate-300">{sale.customerName || t.walkInCustomer}</span>
-                            </td>
-                            <td className="px-4 py-3">
-                              <span className="text-[10px] font-black bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400 px-2 py-0.5 rounded-full uppercase tracking-widest border border-indigo-100 dark:border-indigo-800/30">
-                                {sale.paymentMethod || '-'}
-                              </span>
-                            </td>
-                            <td className="px-4 py-3 text-right text-xs font-black text-slate-900 dark:text-white">
-                              {sale.totalAmount.toLocaleString()} <span className="text-[9px] text-slate-400">MMK</span>
-                            </td>
-                            <td className="px-4 py-3 text-right text-xs font-black text-emerald-600 dark:text-emerald-400">
-                              +{sale.profit.toLocaleString()} <span className="text-[9px] text-emerald-400/50">MMK</span>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                      {filteredReports.length > 0 && (
-                        <tfoot>
-                          <tr className="bg-slate-50 dark:bg-slate-800/50 border-t-2 border-slate-200 dark:border-slate-700">
-                            <td colSpan={4} className="px-4 py-3 text-right text-[10px] font-black text-slate-400 uppercase tracking-widest">{t.total}</td>
-                            <td className="px-4 py-3 text-right text-sm font-black text-indigo-600 dark:text-indigo-400">
-                              {filteredReports.reduce((sum, s) => sum + s.totalAmount, 0).toLocaleString()} <span className="text-[10px]">MMK</span>
-                            </td>
-                            <td className="px-4 py-3 text-right text-sm font-black text-emerald-600 dark:text-emerald-400">
-                              {filteredReports.reduce((sum, s) => sum + s.profit, 0).toLocaleString()} <span className="text-[10px]">MMK</span>
-                            </td>
-                          </tr>
-                        </tfoot>
-                      )}
-                    </table>
-                  </div>
+                              <div className="flex items-center justify-between mb-3">
+                                <span className="text-xs font-black text-slate-900 dark:text-white">{sale.customerName || t.walkInCustomer}</span>
+                                <span className="text-[9px] font-black bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400 px-2 py-0.5 rounded-full uppercase tracking-widest border border-indigo-100 dark:border-indigo-800/30">
+                                  {sale.paymentMethod || '-'}
+                                </span>
+                              </div>
+                              <div className="flex items-center justify-between pt-2 border-t border-slate-100 dark:border-slate-800">
+                                <div className="flex flex-col">
+                                  <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">{t.total}</span>
+                                  <span className="text-sm font-black text-indigo-600 dark:text-indigo-400">{sale.totalAmount.toLocaleString()} {currency}</span>
+                                </div>
+                                <div className="flex flex-col text-right">
+                                  <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">{t.profit}</span>
+                                  <span className="text-sm font-black text-emerald-600 dark:text-emerald-400">+{sale.profit.toLocaleString()} {currency}</span>
+                                </div>
+                              </div>
+                            </div>
+                          ))}
+                          {filteredReports.length > 0 && (
+                            <div className="mt-4 p-4 bg-indigo-50 dark:bg-indigo-900/20 rounded-xl border border-indigo-100 dark:border-indigo-800/50 space-y-2">
+                              <div className="flex items-center justify-between">
+                                <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">{t.totalSales}</span>
+                                <span className="text-base font-black text-indigo-600 dark:text-indigo-400">{filteredReports.reduce((sum, s) => sum + s.totalAmount, 0).toLocaleString()} {currency}</span>
+                              </div>
+                              <div className="flex items-center justify-between">
+                                <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">{t.totalProfit}</span>
+                                <span className="text-base font-black text-emerald-600 dark:text-emerald-400">{filteredReports.reduce((sum, s) => sum + s.profit, 0).toLocaleString()} {currency}</span>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                        {filteredReports.length === 0 && (
+                          <div className="flex-1 flex flex-col items-center justify-center py-20">
+                            <FileText className="text-slate-200 dark:text-slate-800 mb-4" size={64} />
+                            <p className="text-slate-400 font-bold italic uppercase tracking-widest text-xs">{t.noReportsFound}</p>
+                          </div>
+                        )}
+                      </>
+                    )}
 
-                  {/* Mobile List View */}
-                  <div className="sm:hidden overflow-y-auto flex-1 p-2 space-y-2">
-                    {filteredReports.map(sale => (
-                      <div key={sale.id} className="bg-white dark:bg-slate-900 p-3 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm">
-                        <div className="flex items-center justify-between mb-2">
-                          <div className="flex flex-col">
-                            <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{new Date(sale.timestamp).toLocaleDateString()}</span>
-                            <span className="text-[10px] font-bold text-slate-500">{new Date(sale.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                    {reportTab === 'expenses' && (
+                      <>
+                        {/* Desktop Table View */}
+                        <div className="hidden sm:block overflow-x-auto overflow-y-auto flex-1 min-h-0">
+                          <table className="w-full text-left border-collapse">
+                            <thead>
+                              <tr className="bg-slate-50 dark:bg-slate-800/50 border-b border-slate-200 dark:border-slate-700">
+                                <th className="px-4 py-3 text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest">{t.date}</th>
+                                <th className="px-4 py-3 text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest">{t.expenseCategory}</th>
+                                <th className="px-4 py-3 text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest">{t.expenseDescription}</th>
+                                <th className="px-4 py-3 text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest text-right">{t.expenseAmount}</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                              {filteredExpenseReports.map(expense => (
+                                <tr key={expense.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/30 transition-colors group">
+                                  <td className="px-4 py-3 whitespace-nowrap">
+                                    <div className="flex flex-col">
+                                      <span className="text-xs font-bold text-slate-900 dark:text-white">{new Date(expense.timestamp).toLocaleDateString()}</span>
+                                      <span className="text-[10px] text-slate-400">{new Date(expense.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                                    </div>
+                                  </td>
+                                  <td className="px-4 py-3">
+                                    <span className="text-[10px] font-black bg-rose-50 dark:bg-rose-900/20 text-rose-600 dark:text-rose-400 px-2 py-0.5 rounded-full uppercase tracking-widest border border-rose-100 dark:border-rose-800/30">
+                                      {expense.category === 'Staff' ? t.staffCost : 
+                                       expense.category === 'Rent' ? t.rent : 
+                                       expense.category === 'Electricity' ? t.electricity : 
+                                       expense.category === 'General' ? t.generalExpense : 
+                                       (expenseCategories.find(c => c.id === expense.category)?.name || expense.category)}
+                                    </span>
+                                  </td>
+                                  <td className="px-4 py-3">
+                                    <span className="text-xs font-bold text-slate-700 dark:text-slate-300">{expense.description}</span>
+                                  </td>
+                                  <td className="px-4 py-3 text-right text-xs font-black text-rose-600 dark:text-rose-400">
+                                    {expense.amount.toLocaleString()} <span className="text-[9px] text-rose-400/50">{currency}</span>
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                            {filteredExpenseReports.length > 0 && (
+                              <tfoot>
+                                <tr className="bg-slate-50 dark:bg-slate-800/50 border-t-2 border-slate-200 dark:border-slate-700">
+                                  <td colSpan={3} className="px-4 py-3 text-right text-[10px] font-black text-slate-400 uppercase tracking-widest">{t.total}</td>
+                                  <td className="px-4 py-3 text-right text-sm font-black text-rose-600 dark:text-rose-400">
+                                    {filteredExpenseReports.reduce((sum, e) => sum + e.amount, 0).toLocaleString()} <span className="text-[10px]">{currency}</span>
+                                  </td>
+                                </tr>
+                              </tfoot>
+                            )}
+                          </table>
+                        </div>
+
+                        {/* Mobile List View */}
+                        <div className="sm:hidden overflow-y-auto flex-1 min-h-0 p-2 space-y-2">
+                          {filteredExpenseReports.map(expense => (
+                            <div key={expense.id} className="bg-white dark:bg-slate-900 p-3 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm">
+                              <div className="flex items-center justify-between mb-2">
+                                <div className="flex flex-col">
+                                  <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{new Date(expense.timestamp).toLocaleDateString()}</span>
+                                  <span className="text-[10px] font-bold text-slate-500">{new Date(expense.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                                </div>
+                                <span className="text-[9px] font-black bg-rose-50 dark:bg-rose-900/20 text-rose-600 dark:text-rose-400 px-2 py-0.5 rounded-full uppercase tracking-widest border border-rose-100 dark:border-rose-800/30">
+                                  {expense.category === 'Staff' ? t.staffCost : 
+                                   expense.category === 'Rent' ? t.rent : 
+                                   expense.category === 'Electricity' ? t.electricity : 
+                                   expense.category === 'General' ? t.generalExpense : 
+                                   (expenseCategories.find(c => c.id === expense.category)?.name || expense.category)}
+                                </span>
+                              </div>
+                              <div className="mb-3">
+                                <span className="text-xs font-black text-slate-900 dark:text-white">{expense.description}</span>
+                              </div>
+                              <div className="flex items-center justify-between pt-2 border-t border-slate-100 dark:border-slate-800">
+                                <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">{t.expenseAmount}</span>
+                                <span className="text-sm font-black text-rose-600 dark:text-rose-400">{expense.amount.toLocaleString()} {currency}</span>
+                              </div>
+                            </div>
+                          ))}
+                          {filteredExpenseReports.length > 0 && (
+                            <div className="mt-4 p-4 bg-rose-50 dark:bg-rose-900/20 rounded-xl border border-rose-100 dark:border-rose-800/50">
+                              <div className="flex items-center justify-between">
+                                <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">{t.totalExpenses}</span>
+                                <span className="text-base font-black text-rose-600 dark:text-rose-400">{filteredExpenseReports.reduce((sum, e) => sum + e.amount, 0).toLocaleString()} {currency}</span>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                        {filteredExpenseReports.length === 0 && (
+                          <div className="flex-1 flex flex-col items-center justify-center py-20">
+                            <Wallet className="text-slate-200 dark:text-slate-800 mb-4" size={64} />
+                            <p className="text-slate-400 font-bold italic uppercase tracking-widest text-xs">{t.noReportsFound}</p>
                           </div>
-                          <span className="text-[10px] font-mono text-slate-400">#{sale.id.slice(-8)}</span>
-                        </div>
-                        <div className="flex items-center justify-between mb-3">
-                          <span className="text-xs font-black text-slate-900 dark:text-white">{sale.customerName || t.walkInCustomer}</span>
-                          <span className="text-[9px] font-black bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400 px-2 py-0.5 rounded-full uppercase tracking-widest border border-indigo-100 dark:border-indigo-800/30">
-                            {sale.paymentMethod || '-'}
-                          </span>
-                        </div>
-                        <div className="flex items-center justify-between pt-2 border-t border-slate-100 dark:border-slate-800">
-                          <div className="flex flex-col">
-                            <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">{t.total}</span>
-                            <span className="text-sm font-black text-indigo-600 dark:text-indigo-400">{sale.totalAmount.toLocaleString()} MMK</span>
+                        )}
+                      </>
+                    )}
+
+                    {reportTab === 'profit_loss' && (
+                      <div className="flex-1 overflow-y-auto p-2 sm:p-4 lg:p-8 space-y-4 sm:space-y-6 lg:space-y-8">
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 md:gap-6">
+                          <div className="bg-indigo-50 dark:bg-indigo-900/20 p-4 md:p-6 rounded-2xl border border-indigo-100 dark:border-indigo-800/50">
+                            <p className="text-[10px] font-black text-indigo-600 dark:text-indigo-400 uppercase tracking-[0.2em] mb-2">{t.totalSales}</p>
+                            <p className="text-2xl md:text-3xl font-black text-indigo-700 dark:text-indigo-300">
+                              {filteredReports.reduce((sum, s) => sum + s.totalAmount, 0).toLocaleString()} <span className="text-xs md:text-sm">{currency}</span>
+                            </p>
                           </div>
-                          <div className="flex flex-col text-right">
-                            <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">{t.profit}</span>
-                            <span className="text-sm font-black text-emerald-600 dark:text-emerald-400">+{sale.profit.toLocaleString()} MMK</span>
+                          <div className="bg-emerald-50 dark:bg-emerald-900/20 p-4 md:p-6 rounded-2xl border border-emerald-100 dark:border-emerald-800/50">
+                            <p className="text-[10px] font-black text-emerald-600 dark:text-emerald-400 uppercase tracking-[0.2em] mb-2">{t.totalProfit}</p>
+                            <p className="text-2xl md:text-3xl font-black text-emerald-700 dark:text-emerald-300">
+                              {filteredReports.reduce((sum, s) => sum + s.profit, 0).toLocaleString()} <span className="text-xs md:text-sm">{currency}</span>
+                            </p>
+                          </div>
+                          <div className="bg-rose-50 dark:bg-rose-900/20 p-4 md:p-6 rounded-2xl border border-rose-100 dark:border-rose-800/50">
+                            <p className="text-[10px] font-black text-rose-600 dark:text-rose-400 uppercase tracking-[0.2em] mb-2">{t.totalExpenses}</p>
+                            <p className="text-2xl md:text-3xl font-black text-rose-700 dark:text-rose-300">
+                              {filteredExpenseReports.reduce((sum, e) => sum + e.amount, 0).toLocaleString()} <span className="text-xs md:text-sm">{currency}</span>
+                            </p>
                           </div>
                         </div>
-                      </div>
-                    ))}
-                    {filteredReports.length > 0 && (
-                      <div className="mt-4 p-4 bg-indigo-50 dark:bg-indigo-900/20 rounded-xl border border-indigo-100 dark:border-indigo-800/50 space-y-2">
-                        <div className="flex items-center justify-between">
-                          <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">{t.totalSales}</span>
-                          <span className="text-base font-black text-indigo-600 dark:text-indigo-400">{filteredReports.reduce((sum, s) => sum + s.totalAmount, 0).toLocaleString()} MMK</span>
+
+                        <div className="bg-slate-900 dark:bg-black p-5 sm:p-6 md:p-8 rounded-3xl border border-white/10 shadow-2xl relative overflow-hidden">
+                          <div className="absolute top-0 right-0 w-64 h-64 bg-indigo-500/10 blur-[100px] rounded-full -mr-32 -mt-32" />
+                          <div className="relative z-10 flex flex-col items-center text-center">
+                            <p className="text-[12px] font-black text-slate-400 uppercase tracking-[0.4em] mb-4">{t.netProfit}</p>
+                            <p className={cn(
+                              "text-4xl sm:text-5xl md:text-6xl font-black mb-2 break-all",
+                              (filteredReports.reduce((sum, s) => sum + s.profit, 0) - filteredExpenseReports.reduce((sum, e) => sum + e.amount, 0)) >= 0 
+                                ? "text-emerald-400" : "text-rose-400"
+                            )}>
+                              {(filteredReports.reduce((sum, s) => sum + s.profit, 0) - filteredExpenseReports.reduce((sum, e) => sum + e.amount, 0)).toLocaleString()}
+                              <span className="text-lg md:text-xl ml-2 uppercase tracking-widest">{currency}</span>
+                            </p>
+                            <div className="w-24 h-1 bg-gradient-to-r from-transparent via-slate-700 to-transparent my-4 md:my-6" />
+                            <p className="text-slate-500 text-xs md:text-sm font-medium max-w-md">
+                              {t.profitLoss} summary for the selected period from {reportStartDate || 'start'} to {reportEndDate || 'end'}.
+                            </p>
+                          </div>
                         </div>
-                        <div className="flex items-center justify-between">
-                          <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">{t.totalProfit}</span>
-                          <span className="text-base font-black text-emerald-600 dark:text-emerald-400">{filteredReports.reduce((sum, s) => sum + s.profit, 0).toLocaleString()} MMK</span>
+
+                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 md:gap-8">
+                          <div className="glass-panel rounded-2xl p-4 md:p-6 neo-3d">
+                            <h4 className="text-sm font-black text-slate-900 dark:text-white uppercase tracking-widest mb-6 flex items-center gap-2">
+                              <div className="w-2 h-2 bg-indigo-500 rounded-full" />
+                              {t.expenseSummary}
+                            </h4>
+                            <div className="space-y-4">
+                              {Array.from(new Set(filteredExpenseReports.map(e => e.category))).map(cat => {
+                                const amount = filteredExpenseReports.filter(e => e.category === cat).reduce((sum, e) => sum + e.amount, 0);
+                                const total = filteredExpenseReports.reduce((sum, e) => sum + e.amount, 0);
+                                const percentage = total > 0 ? (amount / total) * 100 : 0;
+                                return (
+                                  <div key={cat} className="space-y-2">
+                                    <div className="flex justify-between text-xs font-bold">
+                                      <span className="text-slate-600 dark:text-slate-400">
+                                        {cat === 'Staff' ? t.staffCost : 
+                                         cat === 'Rent' ? t.rent : 
+                                         cat === 'Electricity' ? t.electricity : 
+                                         cat === 'General' ? t.generalExpense : 
+                                         (expenseCategories.find(c => c.id === cat)?.name || cat)}
+                                      </span>
+                                      <span className="text-slate-900 dark:text-white">{amount.toLocaleString()} {currency}</span>
+                                    </div>
+                                    <div className="h-2 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
+                                      <motion.div 
+                                        initial={{ width: 0 }}
+                                        animate={{ width: `${percentage}%` }}
+                                        className="h-full bg-rose-500"
+                                      />
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+
+                          <div className="glass-panel rounded-2xl p-6 neo-3d">
+                            <h4 className="text-sm font-black text-slate-900 dark:text-white uppercase tracking-widest mb-6 flex items-center gap-2">
+                              <div className="w-2 h-2 bg-emerald-500 rounded-full" />
+                              {t.categorySummary}
+                            </h4>
+                            <div className="space-y-4">
+                              {Array.from(new Set(filteredReports.flatMap(s => (s.items || []).map(i => i.category)))).map(cat => {
+                                const amount = filteredReports.reduce((sum, s) => sum + (s.items || []).filter(i => i.category === cat).reduce((isum, i) => isum + (i.price * i.quantity), 0), 0);
+                                const total = filteredReports.reduce((sum, s) => sum + s.totalAmount, 0);
+                                const percentage = total > 0 ? (amount / total) * 100 : 0;
+                                return (
+                                  <div key={cat} className="space-y-2">
+                                    <div className="flex justify-between text-xs font-bold">
+                                      <span className="text-slate-600 dark:text-slate-400">{cat}</span>
+                                      <span className="text-slate-900 dark:text-white">{amount.toLocaleString()} {currency}</span>
+                                    </div>
+                                    <div className="h-2 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
+                                      <motion.div 
+                                        initial={{ width: 0 }}
+                                        animate={{ width: `${percentage}%` }}
+                                        className="h-full bg-indigo-500"
+                                      />
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
                         </div>
                       </div>
                     )}
                   </div>
-                  {filteredReports.length === 0 && (
-                    <div className="flex-1 flex flex-col items-center justify-center py-20">
-                      <FileText className="text-slate-200 dark:text-slate-800 mb-4" size={64} />
-                      <p className="text-slate-400 font-bold italic uppercase tracking-widest text-xs">{t.noReportsFound}</p>
-                    </div>
-                  )}
-                </div>
                 </div>
               </motion.div>
             )}
@@ -3551,7 +3914,7 @@ function App() {
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 exit={{ opacity: 0 }}
-                className="flex flex-col h-full overflow-hidden"
+                className="flex flex-col flex-1 min-h-0 w-full overflow-y-auto lg:overflow-hidden"
               >
                 <div className="p-4 lg:p-6 pb-0 shrink-0">
                   <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 mb-4">
@@ -3559,7 +3922,7 @@ function App() {
                     <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 w-full sm:w-auto">
                       <div className="glass-panel px-3 py-2 sm:px-4 sm:py-2 rounded-none neo-3d border-t border-rose-500/20 flex items-center justify-between sm:justify-start gap-2 w-full sm:w-auto">
                         <span className="text-[10px] text-slate-400 dark:text-slate-500 uppercase font-black tracking-widest">{t.totalExpenses}:</span>
-                        <span className="font-black text-rose-600 dark:text-rose-400 text-sm">{stats.totalExpenses.toLocaleString()} MMK</span>
+                        <span className="font-black text-rose-600 dark:text-rose-400 text-sm">{stats.totalExpenses.toLocaleString()} {currency}</span>
                       </div>
                       <div className="flex items-center gap-2 w-full sm:w-auto">
                         <button 
@@ -3616,14 +3979,22 @@ function App() {
                         <div className="flex items-center justify-between sm:justify-end w-full sm:w-auto gap-3 border-t sm:border-t-0 border-slate-100 dark:border-slate-800 pt-2 sm:pt-0">
                           <div className="text-left sm:text-right">
                             <p className="text-[9px] text-slate-400 font-black uppercase tracking-widest leading-none mb-1">{t.expenseAmount}</p>
-                            <p className="text-sm font-black text-rose-600 dark:text-rose-400 leading-none">-{expense.amount.toLocaleString()} MMK</p>
+                            <p className="text-sm font-black text-rose-600 dark:text-rose-400 leading-none">-{expense.amount.toLocaleString()} {currency}</p>
                           </div>
-                          <button 
-                            onClick={() => setExpenseToDelete(expense.id)}
-                            className="p-1.5 bg-red-50 dark:bg-red-500/10 text-red-500 border border-red-100 dark:border-red-500/20 rounded-lg hover:bg-red-500 hover:text-white transition-all opacity-100 sm:opacity-0 group-hover:opacity-100 shrink-0"
-                          >
-                            <Trash2 size={14} />
-                          </button>
+                          <div className="flex items-center gap-2">
+                            <button 
+                              onClick={() => setEditingExpense(expense)}
+                              className="p-1.5 bg-indigo-50 dark:bg-indigo-500/10 text-indigo-500 border border-indigo-100 dark:border-indigo-500/20 rounded-lg hover:bg-indigo-500 hover:text-white transition-all opacity-100 sm:opacity-0 group-hover:opacity-100 shrink-0"
+                            >
+                              <Pencil size={14} />
+                            </button>
+                            <button 
+                              onClick={() => setExpenseToDelete(expense.id)}
+                              className="p-1.5 bg-red-50 dark:bg-red-500/10 text-red-500 border border-red-100 dark:border-red-500/20 rounded-lg hover:bg-red-500 hover:text-white transition-all opacity-100 sm:opacity-0 group-hover:opacity-100 shrink-0"
+                            >
+                              <Trash2 size={14} />
+                            </button>
+                          </div>
                         </div>
                       </div>
                     </div>
@@ -3644,7 +4015,7 @@ function App() {
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 exit={{ opacity: 0 }}
-                className="flex flex-col h-full overflow-hidden"
+                className="flex flex-col flex-1 min-h-0 w-full overflow-y-auto lg:overflow-hidden"
               >
                 <div className="p-4 lg:p-6 pb-0 shrink-0">
                   <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
@@ -3681,11 +4052,11 @@ function App() {
                                 {t.purchaseHistory}: {customerSales.length}
                               </span>
                               <span className="px-3 py-1 bg-emerald-50 dark:bg-emerald-900/20 text-emerald-600 dark:text-emerald-400 text-[10px] font-black uppercase tracking-widest border border-emerald-200 dark:border-emerald-800">
-                                {t.totalSpent}: {totalSpent.toLocaleString()} MMK
+                                {t.totalSpent}: {totalSpent.toLocaleString()} {currency}
                               </span>
                               {(customer.debt || 0) > 0 && (
                                 <span className="px-3 py-1 bg-rose-50 dark:bg-rose-900/20 text-rose-600 dark:text-rose-400 text-[10px] font-black uppercase tracking-widest border border-rose-200 dark:border-rose-800">
-                                  Debt: {(customer.debt || 0).toLocaleString()} MMK
+                                  Debt: {(customer.debt || 0).toLocaleString()} {currency}
                                 </span>
                               )}
                             </div>
@@ -3729,7 +4100,7 @@ function App() {
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 exit={{ opacity: 0 }}
-                className="w-full space-y-6 max-w-2xl mx-auto h-full overflow-y-auto p-4 lg:p-8 pb-48 min-h-0"
+                className="w-full space-y-6 max-w-2xl mx-auto flex-1 h-full min-h-0 overflow-y-auto p-4 lg:p-8 pb-48"
               >
                 <div className="flex items-center gap-4 mb-8">
                   <div className="w-12 h-12 bg-slate-800 rounded-xl flex items-center justify-center text-white shadow-lg neo-3d">
@@ -3824,6 +4195,45 @@ function App() {
                         className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${darkMode ? 'translate-x-6' : 'translate-x-1'}`}
                       />
                     </button>
+                  </div>
+                </div>
+
+                {/* Currency Settings */}
+                <div className="glass-panel p-4 sm:p-8 rounded-2xl neo-3d border-t-2 border-slate-500/20 mt-8">
+                  <div className="flex items-center gap-4 mb-6">
+                    <div className="w-10 h-10 bg-slate-100 dark:bg-slate-800 rounded-xl flex items-center justify-center text-slate-700 dark:text-slate-300">
+                      <DollarSign size={20} />
+                    </div>
+                    <h3 className="text-xl font-bold text-slate-900 dark:text-white uppercase tracking-wider">{t.selectCurrency}</h3>
+                  </div>
+                  
+                  <div className="space-y-4">
+                    <div className="relative group/input">
+                      <div className="absolute inset-0 bg-gradient-to-r from-indigo-500 to-purple-500 rounded-xl blur opacity-10 group-hover/input:opacity-20 transition-opacity" />
+                      <select
+                        value={currency}
+                        onChange={async (e) => {
+                          const newCurrency = e.target.value;
+                          setCurrency(newCurrency);
+                          try {
+                            await setDoc(doc(db, 'settings', 'general'), { currency: newCurrency }, { merge: true });
+                          } catch (error) {
+                            console.error("Error updating currency:", error);
+                          }
+                        }}
+                        className="relative w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all text-slate-900 dark:text-white font-bold outline-none appearance-none"
+                      >
+                        <option value="MMK">MMK (Kyat)</option>
+                        <option value="USD">USD (Dollar)</option>
+                        <option value="THB">THB (Baht)</option>
+                        <option value="CNY">CNY (Yuan)</option>
+                        <option value="EUR">EUR (Euro)</option>
+                        <option value="SGD">SGD (Dollar)</option>
+                      </select>
+                      <div className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400">
+                        <ChevronDown size={18} />
+                      </div>
+                    </div>
                   </div>
                 </div>
 
@@ -4486,6 +4896,34 @@ function App() {
           </div>
         )}
 
+        {editingExpense && (
+          <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-[100] flex items-center justify-center p-4">
+            <motion.div 
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              className="bg-white dark:bg-slate-900 w-full max-w-lg rounded-none neo-3d border-t-8 border-indigo-600 overflow-hidden"
+            >
+              <div className="p-8">
+                <div className="flex items-center justify-between mb-8">
+                  <h3 className="text-2xl font-black text-slate-900 dark:text-white uppercase tracking-widest">{t.editExpense}</h3>
+                  <button onClick={() => setEditingExpense(null)} className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full text-slate-500 transition-colors">
+                    <X size={24} />
+                  </button>
+                </div>
+                <AddExpenseForm 
+                  initialData={editingExpense}
+                  onSave={(data) => updateExpense(editingExpense.id, data)} 
+                  onCancel={() => setEditingExpense(null)} 
+                  t={t} 
+                  branches={branches}
+                  selectedBranchId={selectedBranchId}
+                  expenseCategories={expenseCategories}
+                />
+              </div>
+            </motion.div>
+          </div>
+        )}
+
         {isHeldCartsOpen && (
           <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
             <motion.div 
@@ -4595,7 +5033,7 @@ function App() {
                       </div>
                       <div className="text-right">
                         <p className="text-[10px] font-bold text-rose-500 uppercase tracking-wider">Debt</p>
-                        <p className="font-black text-rose-600 dark:text-rose-400">{(customer.debt || 0).toLocaleString()} MMK</p>
+                        <p className="font-black text-rose-600 dark:text-rose-400">{(customer.debt || 0).toLocaleString()} {currency}</p>
                       </div>
                     </button>
                   ))
@@ -4700,10 +5138,10 @@ function App() {
                 </div>
                 <div>
                   <p className="text-sm text-slate-500 dark:text-slate-400 mb-1">Current Debt</p>
-                  <p className="font-bold text-rose-500 text-lg">{(selectedCustomerForDebt.debt || 0).toLocaleString()} MMK</p>
+                  <p className="font-bold text-rose-500 text-lg">{(selectedCustomerForDebt.debt || 0).toLocaleString()} {currency}</p>
                 </div>
                 <div>
-                  <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-2">Payment Amount (MMK)</label>
+                  <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-2">Payment Amount ({currency})</label>
                   <input 
                     type="number" 
                     name="amount"
@@ -5387,8 +5825,8 @@ function App() {
                           </div>
                           <div className="flex items-center gap-2">
                             <span className="text-[11px] font-medium text-slate-500 uppercase tracking-widest">
-                              {item.quantity} x {item.price.toLocaleString()} {t.currency}
-                              {item.discountValue ? ` (-${item.discountType === 'percentage' ? `${item.discountValue}%` : `${item.discountValue} ${t.currency}`})` : ''}
+                              {item.quantity} x {item.price.toLocaleString()} {currency}
+                              {item.discountValue ? ` (-${item.discountType === 'percentage' ? `${item.discountValue}%` : `${item.discountValue} ${currency}`})` : ''}
                             </span>
                             <div className="flex-1 border-t border-dotted border-slate-200" />
                           </div>
@@ -5401,18 +5839,18 @@ function App() {
                     <div className="space-y-2 mb-6">
                       <div className="flex justify-between text-[11px] font-bold text-slate-600 uppercase tracking-widest">
                         <span>{t.subtotal}</span>
-                        <span>{(lastSale.totalAmount + (lastSale.discount || 0) - (lastSale.deliveryFee || 0)).toLocaleString()} {t.currency}</span>
+                        <span>{(lastSale.totalAmount + (lastSale.discount || 0) - (lastSale.deliveryFee || 0)).toLocaleString()} {currency}</span>
                       </div>
                       {lastSale.discount && lastSale.discount > 0 ? (
                         <div className="flex justify-between text-[11px] font-bold text-slate-600 uppercase tracking-widest">
                           <span>{t.discount}</span>
-                          <span>-{lastSale.discount.toLocaleString()} {t.currency}</span>
+                          <span>-{lastSale.discount.toLocaleString()} {currency}</span>
                         </div>
                       ) : null}
                       {lastSale.deliveryFee && lastSale.deliveryFee > 0 ? (
                         <div className="flex justify-between text-[11px] font-bold text-slate-600 uppercase tracking-widest">
                           <span>{t.deliveryFee}</span>
-                          <span>+{lastSale.deliveryFee.toLocaleString()} {t.currency}</span>
+                          <span>+{lastSale.deliveryFee.toLocaleString()} {currency}</span>
                         </div>
                       ) : null}
                       <div className="h-px bg-slate-900" />
@@ -5422,7 +5860,7 @@ function App() {
                           <p className="text-xl font-bold text-slate-900 tracking-tighter leading-none">
                             {lastSale.totalAmount.toLocaleString()}
                           </p>
-                          <p className="text-[10px] font-bold text-slate-600 uppercase tracking-widest mt-0.5">{t.kyatsOnly}</p>
+                          <p className="text-[10px] font-bold text-slate-600 uppercase tracking-widest mt-0.5">{currency} {t.kyatsOnly}</p>
                         </div>
                       </div>
                     </div>
@@ -5437,7 +5875,7 @@ function App() {
                           <p className="text-xl font-bold text-slate-900 tracking-tighter leading-none">
                             {lastSale.totalAmount.toLocaleString()}
                           </p>
-                          <p className="text-[10px] font-bold text-slate-600 uppercase tracking-widest mt-0.5">{t.kyatsOnly}</p>
+                          <p className="text-[10px] font-bold text-slate-600 uppercase tracking-widest mt-0.5">{currency} {t.kyatsOnly}</p>
                         </div>
                       </div>
                     </div>
@@ -5534,7 +5972,8 @@ function CartContent({
   updateCartItemDiscount,
   isCheckingOut,
   checkoutError,
-  onPayDebt
+  onPayDebt,
+  currency
 }: { 
   cartItems: { product: Product, qty: number, discountType: 'percentage' | 'fixed', discountValue: number }[], 
   cartTotal: number, 
@@ -5566,7 +6005,8 @@ function CartContent({
   updateCartItemDiscount: (id: string, type: 'percentage' | 'fixed', val: number) => void,
   isCheckingOut?: boolean,
   checkoutError?: string | null,
-  onPayDebt?: (customer: Customer) => void
+  onPayDebt?: (customer: Customer) => void,
+  currency: string
 }) {
   const [discountingItem, setDiscountingItem] = useState<{ id: string, name: string, type: 'percentage' | 'fixed', value: number } | null>(null);
 
@@ -5615,7 +6055,7 @@ function CartContent({
                         }
                       }
                       return Math.max(0, itemTotal).toLocaleString();
-                    })()} MMK
+                    })()} {currency}
                     {discountValue > 0 && (
                       <span className="text-slate-400 line-through ml-1 text-[9px]">
                         {(product.price * qty).toLocaleString()}
@@ -5668,7 +6108,7 @@ function CartContent({
                     max={discountType === 'percentage' ? "100" : undefined}
                   />
                   <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[9px] font-bold text-slate-400">
-                    {discountType === 'percentage' ? '%' : 'MMK'}
+                    {discountType === 'percentage' ? '%' : currency}
                   </span>
                 </div>
               </div>
@@ -5798,7 +6238,7 @@ function CartContent({
                 <div className="mt-2 bg-rose-50 dark:bg-rose-900/20 p-2.5 rounded-xl border border-rose-200 dark:border-rose-800 flex justify-between items-center">
                   <div>
                     <p className="text-[10px] font-bold text-rose-600 dark:text-rose-400 uppercase tracking-wider">Outstanding Debt</p>
-                    <p className="font-black text-rose-700 dark:text-rose-300 text-sm">{customers.find(c => c.id === checkoutCustomerId)?.debt?.toLocaleString()} MMK</p>
+                    <p className="font-black text-rose-700 dark:text-rose-300 text-sm">{customers.find(c => c.id === checkoutCustomerId)?.debt?.toLocaleString()} {currency}</p>
                   </div>
                   <button
                     onClick={() => onPayDebt && onPayDebt(customers.find(c => c.id === checkoutCustomerId)!)}
@@ -5920,18 +6360,18 @@ function CartContent({
           <div className="space-y-1.5 pt-2 border-t border-slate-100 dark:border-slate-800">
             <div className="flex justify-between text-[11px] font-medium text-slate-500 dark:text-slate-400">
               <span>{t.subtotal}</span>
-              <span>{cartTotal.toLocaleString()} MMK</span>
+              <span>{cartTotal.toLocaleString()} {currency}</span>
             </div>
             {checkoutDiscount > 0 && (
               <div className="flex justify-between text-[11px] font-bold text-rose-500 dark:text-rose-400">
                 <span>{t.discount} {checkoutDiscountType === 'percentage' ? `(${checkoutDiscount}%)` : ''}</span>
-                <span>-{checkoutDiscountType === 'percentage' ? (cartTotal * (checkoutDiscount / 100)).toLocaleString() : checkoutDiscount.toLocaleString()} MMK</span>
+                <span>-{checkoutDiscountType === 'percentage' ? (cartTotal * (checkoutDiscount / 100)).toLocaleString() : checkoutDiscount.toLocaleString()} {currency}</span>
               </div>
             )}
             {checkoutDeliveryFee > 0 && (
               <div className="flex justify-between text-[11px] font-bold text-slate-600 dark:text-slate-400">
                 <span>{t.deliveryFee}</span>
-                <span>+{checkoutDeliveryFee.toLocaleString()} MMK</span>
+                <span>+{checkoutDeliveryFee.toLocaleString()} {currency}</span>
               </div>
             )}
             <div className="flex justify-between text-sm sm:text-base font-black text-slate-900 dark:text-white pt-2 border-t-2 border-slate-100 dark:border-slate-800 items-baseline">
@@ -5944,7 +6384,7 @@ function CartContent({
                   discountAmount = checkoutDiscount;
                 }
                 return (Math.max(0, cartTotal - discountAmount) + checkoutDeliveryFee).toLocaleString();
-              })()} MMK</span>
+              })()} {currency}</span>
             </div>
           </div>
           <div className="flex gap-2">
@@ -6000,6 +6440,7 @@ function CartContent({
     </div>
   );
 }
+
 // --- Sub-components ---
 
 function SidebarItem({ icon, label, active, onClick, badge }: { icon: React.ReactNode, label: string, active: boolean, onClick: () => void, badge?: number }) {
@@ -6021,7 +6462,7 @@ function SidebarItem({ icon, label, active, onClick, badge }: { icon: React.Reac
           {icon}
         </span>
         <span className={cn(
-          "text-[15px] transition-colors leading-tight",
+          "text-sm transition-colors leading-tight whitespace-nowrap",
           active ? "text-white" : "text-slate-200 group-hover:text-white"
         )}>{label}</span>
       </div>
@@ -6040,7 +6481,7 @@ function SidebarItem({ icon, label, active, onClick, badge }: { icon: React.Reac
   );
 }
 
-function StatCard({ title, value, icon, color, unit = "MMK" }: { title: string, value: number, icon: React.ReactNode, color: string, unit?: string }) {
+function StatCard({ title, value, icon, color, unit }: { title: string, value: number, icon: React.ReactNode, color: string, unit?: string }) {
   const colors: { [key: string]: string } = {
     emerald: "bg-emerald-500 border-emerald-600 shadow-emerald-500/20",
     amber: "bg-amber-500 border-amber-600 shadow-amber-500/20",
@@ -6190,107 +6631,236 @@ function BarcodeScannerModal({
 }) {
   const [error, setError] = useState<string | null>(null);
   const [isInitializing, setIsInitializing] = useState(true);
+  const [cameras, setCameras] = useState<any[]>([]);
+  const [currentCameraIndex, setCurrentCameraIndex] = useState(0);
   const scannerId = useMemo(() => `reader-${Math.random().toString(36).substring(2, 9)}`, []);
+  const scannerRef = useRef<Html5Qrcode | null>(null);
+  const onScanRef = useRef(onScan);
+  onScanRef.current = onScan;
+  const isMountedRef = useRef(true);
 
-  useEffect(() => {
-    let html5QrCode: Html5Qrcode | null = null;
-    let isMounted = true;
-
-    const startScanner = async () => {
-      // Small delay to wait for modal animation to finish
-      await new Promise(resolve => setTimeout(resolve, 100));
-      
-      if (!isMounted) return;
-
+  const stopScanner = useCallback(async () => {
+    if (scannerRef.current && scannerRef.current.isScanning) {
       try {
-        const element = document.getElementById(scannerId);
-        if (!element) return;
+        await scannerRef.current.stop();
+        scannerRef.current.clear();
+      } catch (e) {
+        console.error("Error stopping scanner", e);
+      }
+    }
+  }, []);
 
-        html5QrCode = new Html5Qrcode(scannerId);
-        
-        const devices = await Html5Qrcode.getCameras();
-        if (!devices || devices.length === 0) {
-          throw new Error("No cameras found on this device.");
+  const startScanner = useCallback(async (cameraIndex: number | null = null) => {
+    // Check for browser support first
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      setError("Your browser does not support camera access or is not in a secure context (HTTPS). Please try a different browser or open in a new tab.");
+      setIsInitializing(false);
+      return;
+    }
+
+    setIsInitializing(true);
+    setError(null);
+
+    // Small delay to wait for modal animation to finish
+    await new Promise(resolve => setTimeout(resolve, 300));
+    
+    if (!isMountedRef.current) return;
+    const element = document.getElementById(scannerId);
+    if (!element) return;
+
+    try {
+      await stopScanner();
+      
+      const html5QrCode = new Html5Qrcode(scannerId);
+      scannerRef.current = html5QrCode;
+      
+      const devices = await Html5Qrcode.getCameras();
+      if (isMountedRef.current) setCameras(devices);
+      
+      if (!devices || devices.length === 0) {
+        throw new Error("No cameras found on this device.");
+      }
+
+      const config = {
+        fps: 15,
+        qrbox: (viewfinderWidth: number, viewfinderHeight: number) => {
+          const minDimension = Math.min(viewfinderWidth, viewfinderHeight);
+          const qrboxSize = Math.floor(minDimension * 0.8);
+          return {
+            width: qrboxSize,
+            height: Math.floor(qrboxSize * 0.5)
+          };
+        },
+      };
+
+      const onScanSuccess = (decodedText: string) => {
+        if (scannerRef.current && scannerRef.current.isScanning) {
+          scannerRef.current.stop().then(() => {
+            if (isMountedRef.current) onScanRef.current(decodedText);
+          }).catch(() => {
+            if (isMountedRef.current) onScanRef.current(decodedText);
+          });
         }
+      };
 
+      const onScanFailure = () => {};
+
+      if (cameraIndex !== null && devices[cameraIndex]) {
         await html5QrCode.start(
-          { facingMode: "environment" }, 
-          {
-            fps: 10,
-            qrbox: { width: 250, height: 150 },
-          },
-          (decodedText) => {
-            if (html5QrCode && html5QrCode.isScanning) {
-              html5QrCode.stop().then(() => {
-                if (isMounted) onScan(decodedText);
-              }).catch(() => {
-                if (isMounted) onScan(decodedText);
-              });
-            }
-          },
-          () => {
-            // ignore constant scanning errors
-          }
+          devices[cameraIndex].id,
+          config,
+          onScanSuccess,
+          onScanFailure
         );
-        if (isMounted) setIsInitializing(false);
-      } catch (err: any) {
-        console.error("Unable to start scanning", err);
-        if (isMounted) {
-          setError(err.message || "Could not access camera. Please check permissions.");
-          setIsInitializing(false);
+      } else {
+        try {
+          await html5QrCode.start(
+            { facingMode: "environment" }, 
+            config,
+            onScanSuccess,
+            onScanFailure
+          );
+          // Find which camera was started to update currentCameraIndex
+          const activeCamera = devices.find(d => d.label.toLowerCase().includes('back') || d.label.toLowerCase().includes('environment'));
+          if (activeCamera) {
+            const idx = devices.indexOf(activeCamera);
+            if (isMountedRef.current) setCurrentCameraIndex(idx);
+          }
+        } catch (e) {
+          await html5QrCode.start(
+            devices[0].id,
+            config,
+            onScanSuccess,
+            onScanFailure
+          );
+          if (isMountedRef.current) setCurrentCameraIndex(0);
         }
       }
-    };
 
+      if (isMountedRef.current) setIsInitializing(false);
+    } catch (err: any) {
+      console.error("Unable to start scanning", err);
+      if (isMountedRef.current) {
+        let msg = err.message || "Could not access camera.";
+        if (msg.includes("Permission denied") || msg.includes("NotAllowedError")) {
+          msg = t.cameraPermissionDenied;
+        } else if (msg.includes("NotFound") || msg.includes("OverconstrainedError")) {
+          msg = t.cameraNotFound;
+        }
+        setError(msg);
+        setIsInitializing(false);
+      }
+    }
+  }, [scannerId, stopScanner, t]);
+
+  const switchCamera = useCallback(() => {
+    if (cameras.length > 1) {
+      const nextIndex = (currentCameraIndex + 1) % cameras.length;
+      setCurrentCameraIndex(nextIndex);
+      startScanner(nextIndex);
+    }
+  }, [cameras, currentCameraIndex, startScanner]);
+
+  useEffect(() => {
+    isMountedRef.current = true;
     startScanner();
 
     return () => {
-      isMounted = false;
-      if (html5QrCode) {
-        if (html5QrCode.isScanning) {
-          html5QrCode.stop().catch(err => console.error("Error stopping scanner", err));
-        }
-      }
+      isMountedRef.current = false;
+      stopScanner();
     };
-  }, [onScan, scannerId]);
+  }, [startScanner, stopScanner]);
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-sm">
       <div className="bg-white dark:bg-slate-900 rounded-3xl w-full max-w-md overflow-hidden shadow-2xl border border-slate-200 dark:border-slate-800 flex flex-col">
         <div className="p-4 sm:p-6 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between bg-slate-50/50 dark:bg-slate-800/50">
           <h2 className="text-lg sm:text-xl font-black text-slate-900 dark:text-white uppercase tracking-widest">{t.barcode || 'Scan Barcode'}</h2>
-          <button 
-            onClick={onClose}
-            className="p-2 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-full transition-colors text-slate-500 dark:text-slate-400"
-          >
-            <X size={20} />
-          </button>
+          <div className="flex items-center gap-2">
+            {cameras.length > 1 && !error && !isInitializing && (
+              <button 
+                onClick={switchCamera}
+                className="p-2 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-full transition-colors text-indigo-600 dark:text-indigo-400"
+                title={t.switchCamera}
+              >
+                <Languages size={20} />
+              </button>
+            )}
+            <button 
+              onClick={onClose}
+              className="p-2 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-full transition-colors text-slate-500 dark:text-slate-400"
+            >
+              <X size={20} />
+            </button>
+          </div>
         </div>
-        <div className="p-4 sm:p-6 flex-1 overflow-y-auto min-h-[300px] flex flex-col">
-          <div id={scannerId} className="w-full overflow-hidden rounded-xl border-2 border-dashed border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50 min-h-[250px] flex items-center justify-center relative">
+        <div className="p-4 sm:p-6 flex-1 overflow-y-auto min-h-[300px] flex flex-col relative">
+          <div className="w-full aspect-square max-h-[400px] mx-auto overflow-hidden rounded-2xl border-2 border-dashed border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50 flex items-center justify-center relative shadow-inner">
+            {/* Dedicated scanner container that React won't touch children of */}
+            <div id={scannerId} className="w-full h-full absolute inset-0" />
+            
             {isInitializing && (
-              <div className="flex flex-col items-center gap-3">
+              <div className="flex flex-col items-center gap-3 z-10">
                 <Loader2 className="animate-spin text-indigo-600" size={32} />
-                <div className="text-slate-400 text-sm font-bold animate-pulse">Initializing camera...</div>
+                <div className="text-slate-400 text-sm font-bold animate-pulse">{t.initializingCamera}</div>
               </div>
             )}
             {error && (
-              <div className="p-6 text-center">
+              <div className="p-6 text-center z-10">
                 <AlertCircle className="mx-auto text-red-500 mb-3" size={40} />
-                <p className="text-red-600 dark:text-red-400 font-bold text-sm mb-4">{error}</p>
-                <button 
-                  onClick={() => window.location.reload()}
-                  className="px-4 py-2 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 rounded-lg font-bold text-xs"
-                >
-                  Reload App
-                </button>
+                <p className="text-red-600 dark:text-red-400 font-bold text-sm mb-4 leading-relaxed">{error}</p>
+                <div className="flex flex-col gap-2">
+                  <button 
+                    onClick={() => startScanner()}
+                    className="px-4 py-2 bg-indigo-600 text-white rounded-lg font-bold text-xs hover:bg-indigo-700 transition-colors"
+                  >
+                    {t.tryAgain}
+                  </button>
+                  <button 
+                    onClick={() => window.open(window.location.href, '_blank')}
+                    className="px-4 py-2 bg-emerald-600 text-white rounded-lg font-bold text-xs hover:bg-emerald-700 transition-colors"
+                  >
+                    {t.openInNewTab}
+                  </button>
+                  <button 
+                    onClick={() => window.location.reload()}
+                    className="px-4 py-2 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 rounded-lg font-bold text-xs hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors"
+                  >
+                    {t.reloadApp}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Scanning Animation Overlay */}
+            {!error && !isInitializing && (
+              <div className="absolute inset-0 pointer-events-none z-10">
+                <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[80%] h-[40%] border-2 border-indigo-500/50 rounded-lg shadow-[0_0_20px_rgba(99,102,241,0.3)]" />
+                <motion.div 
+                  animate={{ top: ['30%', '70%', '30%'] }}
+                  transition={{ duration: 2, repeat: Infinity, ease: "linear" }}
+                  className="absolute left-[10%] right-[10%] h-0.5 bg-indigo-500 shadow-[0_0_10px_rgba(99,102,241,0.8)]"
+                />
               </div>
             )}
           </div>
           {!error && !isInitializing && (
-            <p className="text-center text-xs text-slate-500 dark:text-slate-400 mt-4 font-medium italic">
-              Point your camera at a barcode to scan it automatically.
-            </p>
+            <div className="mt-4 space-y-3">
+              <p className="text-center text-xs text-slate-500 dark:text-slate-400 font-medium italic">
+                {t.cameraInstructions}
+              </p>
+              {cameras.length > 1 && (
+                <div className="flex justify-center">
+                  <button 
+                    onClick={switchCamera}
+                    className="flex items-center gap-2 px-4 py-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 rounded-xl text-xs font-bold transition-all border border-slate-200 dark:border-slate-700"
+                  >
+                    <Languages size={14} />
+                    {t.switchCamera} ({currentCameraIndex + 1}/{cameras.length})
+                  </button>
+                </div>
+              )}
+            </div>
           )}
         </div>
       </div>
@@ -6751,7 +7321,8 @@ function AddExpenseForm({
   t,
   branches,
   selectedBranchId,
-  expenseCategories
+  expenseCategories,
+  initialData
 }: { 
   onSave: (data: any) => void; 
   onCancel: () => void; 
@@ -6759,12 +7330,13 @@ function AddExpenseForm({
   branches: Branch[];
   selectedBranchId: string;
   expenseCategories: ExpenseCategory[];
+  initialData?: Expense | null;
 }) {
   const [formData, setFormData] = useState({
-    description: '',
-    amount: '',
-    category: 'General',
-    branchId: selectedBranchId === 'all' ? 'main' : selectedBranchId
+    description: initialData?.description || '',
+    amount: initialData?.amount.toString() || '',
+    category: initialData?.category || 'General',
+    branchId: initialData?.branchId || (selectedBranchId === 'all' ? 'main' : selectedBranchId)
   });
 
   const categories = [
@@ -6849,7 +7421,7 @@ function AddExpenseForm({
           type="submit"
           className="px-8 py-2.5 bg-indigo-600 text-white rounded-xl font-bold hover:bg-indigo-700 shadow-lg shadow-indigo-200 dark:shadow-none transition-all"
         >
-          {t.save}
+          {initialData ? t.updateExpense : t.save}
         </button>
       </div>
     </form>

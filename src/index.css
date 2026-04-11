@@ -141,4 +141,37 @@
     cursor: pointer;
     opacity: 0;
   }
+
+  /* Barcode Scanner Customization */
+  div[id^="reader-"] {
+    border: none !important;
+    background: transparent !important;
+    width: 100% !important;
+    height: 100% !important;
+    position: absolute !important;
+    inset: 0 !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    overflow: hidden !important;
+  }
+
+  div[id^="reader-"] video {
+    width: 100% !important;
+    height: 100% !important;
+    object-fit: cover !important;
+    border-radius: 0.75rem !important;
+  }
+
+  /* Hide html5-qrcode's default UI elements that might clutter the view */
+  div[id^="reader-"] img[alt="Camera menu"],
+  div[id^="reader-"] button {
+    display: none !important;
+  }
+
+  /* Custom scanning region overlay style if needed */
+  #qr-shaded-region {
+    border-color: rgba(0, 0, 0, 0.5) !important;
+    border-width: 40px !important;
+  }
 }
